@@ -1,0 +1,6 @@
+{
+  "name": "ARIA - Quality Gate para Atos de Óbito",
+  "description": "Assistente de pré-lavratura cartorária e Quality Gate determinístico multifonte para atos de registro civil de óbito (REF-11 / INE5448).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
