@@ -665,13 +665,6 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           </button>
           <span className="text-slate-600">|</span>
           <span>Trilha SHA-256: <strong className="font-mono text-slate-300">{auditLogs.length} blocos</strong></span>
-          <span className="text-slate-600">|</span>
-          <button
-            onClick={() => setIsPackagerModalOpen(true)}
-            className="text-cyan-400 hover:text-cyan-300 hover:underline"
-          >
-            Windows Standalone (.EXE)
-          </button>
         </div>
       </footer>
 

@@ -1,8 +1,5 @@
 import React from 'react';
 import { 
-  Minus, 
-  Square, 
-  X, 
   Scale, 
   Clock, 
   Building2,
@@ -116,45 +113,13 @@ export const DesktopTitleBar: React.FC<DesktopTitleBarProps> = ({
             </button>
           )}
         </div>
+      </div>
 
+      {/* Right: Clock */}
+      <div className="flex items-center space-x-2">
         <div className="flex items-center space-x-1.5 font-mono text-slate-400">
           <Clock className="w-3 h-3 text-cyan-400" />
           <span>{time}</span>
-        </div>
-      </div>
-
-      {/* Right: Windows Controls */}
-      <div className="flex items-center space-x-2">
-        {/* Windows Standard Window Chrome Buttons */}
-        <div className="flex items-center -mr-1">
-          <button 
-            type="button"
-            className="w-7 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-            title="Minimizar (Janela Windows)"
-            onClick={() => {}}
-          >
-            <Minus className="w-3 h-3" />
-          </button>
-          <button 
-            type="button"
-            className="w-7 h-6 flex items-center justify-center hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-            title="Maximizar / Restaurar"
-            onClick={() => {}}
-          >
-            <Square className="w-2.5 h-2.5" />
-          </button>
-          <button 
-            type="button"
-            className="w-8 h-6 flex items-center justify-center hover:bg-rose-600 text-slate-400 hover:text-white transition-colors"
-            title="Fechar Janela"
-            onClick={() => {
-              if (confirm('Deseja salvar a sessão de auditoria e fechar o aplicativo ARIA?')) {
-                onOpenAudit?.();
-              }
-            }}
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
         </div>
       </div>
     </header>

@@ -108,8 +108,11 @@ app.whenReady().then(() => {
   licenseManager = new LicenseManager(app);
   licenseManager.initStartupValidation();
 
-  // 2. Motor de LLM Local Embutida (Qwen2.5-1.5B com Lazy Loading)
+  // 2. Motor de LLM/VLM Multimodal (Qwen2-VL com mmproj via llama.exe)
   llmEngine = new LocalLLMEngine(app);
+  llmEngine.ensureServerRunning().catch((err) => {
+    console.warn('[ARIA LLM] Aviso na inicialização do servidor:', err.message);
+  });
 
   createWindow();
 });

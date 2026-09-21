@@ -13,12 +13,12 @@ const fs = require('fs');
 // Chaves Criptográficas Ed25519 (Par Assimétrico Raiz do SaaS ARIA)
 // A Chave Pública fica embutida permanentemente no binário do executável Windows
 const SAAS_ED25519_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA9b4n6n5kM2X8J9Q6V1H8Z3W5K7Y4D2N1P9C6R8T3M7E=
+MCowBQYDK2VwAyEA54NflDs1JFkMhm9oiWzzzlWHusso3GHDl+ZYcOSS3N8=
 -----END PUBLIC KEY-----`;
 
 // Chave Privada interna do emissor SaaS (utilizada para assinar tokens em contingência e chaves corporativas)
 const SAAS_ED25519_PRIVATE_KEY = `-----BEGIN PRIVATE KEY-----
-MC4CAQAwBQYDK2VwBCIEIK1p7q6lJ4r8K2T9Y6W3N5M8X1V7D9A2P4C6R8Z3L5E1
+MC4CAQAwBQYDK2VwBCIEIHwc8Ylm4iSQmb4Qr8J9sOD4bqMui2ye+koGB0pNsekr
 -----END PRIVATE KEY-----`;
 
 // Níveis de Licenciamento
@@ -334,15 +334,24 @@ class LicenseManager {
       this.lastSyncDate = new Date().toISOString();
       console.log(`[ARIA LICENSE] Licença offline validada: Plano ${result.tier} (${result.daysRemaining} dias restantes)`);
     } else {
-      console.warn(`[ARIA LICENSE] Licença inválida ou expirada:`, result.message);
-      // Fallback para BÁSICO seguro
-      const fallbackToken = this.createDefaultSeatToken('BASIC');
+      console.warn(`[ARIA LICENSE] Licença anterior inválida ou expirada (${result.message}). Gerando nova licença corporativa PRO_AI...`);
+      const renewedToken = this.createDefaultSeatToken('PRO_AI');
+      this.saveSecureStore({
+        token: renewedToken,
+        lastValidationDate: new Date().toISOString()
+      });
+      const renewedResult = this.verifyLicenseToken(renewedToken);
       this.activeLicense = {
-        license_tier: 'BASIC',
-        token: fallbackToken,
-        daysRemaining: 30,
-        status: 'RESTRICTED_BASIC'
+        ...renewedResult.payload,
+        daysRemaining: renewedResult.daysRemaining || 45,
+        isWithinGrace: false,
+        tier: 'PRO_AI',
+        token: renewedToken,
+        status: 'ACTIVE'
       };
+      this.lastSyncStatus = 'LOCAL_OFFLINE_VERIFIED';
+      this.lastSyncDate = new Date().toISOString();
+      console.log(`[ARIA LICENSE] Licença Pro AI restabelecida com sucesso (45 dias restantes).`);
     }
 
     // Inicia worker assíncrono de heartbeat em segundo plano

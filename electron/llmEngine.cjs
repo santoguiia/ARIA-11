@@ -33,7 +33,7 @@ class LocalLLMEngine {
    */
   resolveBinaryPath() {
     const isPackaged = this.app ? this.app.isPackaged : false;
-    const appRoot = this.app ? this.app.getAppPath() : process.cwd();
+    const appRoot = this.getProjectRoot();
 
     const candidates = [];
 
@@ -63,6 +63,24 @@ class LocalLLMEngine {
   }
 
   /**
+   * Resolvedor de raiz do projeto
+   */
+  getProjectRoot() {
+    if (this.app) {
+      const appPath = this.app.getAppPath();
+      if (fs.existsSync(path.join(appPath, 'resources', 'models'))) {
+        return appPath;
+      }
+      const parent = path.dirname(appPath);
+      if (fs.existsSync(path.join(parent, 'resources', 'models'))) {
+        return parent;
+      }
+      return appPath;
+    }
+    return process.cwd();
+  }
+
+  /**
    * Resolvedor de caminhos dos modelos GGUF e mmproj
    */
   resolveModelPaths() {
@@ -74,7 +92,7 @@ class LocalLLMEngine {
       baseDir = path.join(process.resourcesPath, 'models');
       environment = 'PACKAGED_PRODUCTION';
     } else {
-      const appRoot = this.app ? this.app.getAppPath() : process.cwd();
+      const appRoot = this.getProjectRoot();
       baseDir = path.join(appRoot, 'resources', 'models');
       environment = 'DEVELOPMENT';
     }

@@ -301,17 +301,6 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
                   <span>Licenciamento SaaS Local-First & HWID</span>
                 </button>
               )}
-              <div className="border-t border-slate-700 my-1"></div>
-              <button
-                onClick={() => {
-                  onOpenPackagerModal();
-                  setOpenMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs"
-              >
-                <Cpu className="w-3.5 h-3.5 text-pink-400" />
-                <span>Configurar Standalone Windows (.EXE)</span>
-              </button>
             </div>
           )}
         </div>
