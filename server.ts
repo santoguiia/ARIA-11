@@ -42,8 +42,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // 2. Endpoint de Visão Computacional com Vision LLM (Multimodal)
-// Recebe a imagem escaneada e utiliza o Gemini Vision para classificar o documento,
-// extrair todas as entidades do ato de óbito e calcular as Bounding Boxes de cada campo.
+// Processa via servidor local Qwen2-VL (porta 8089) com fallback inteligente
 app.post('/api/vision-ocr', async (req, res) => {
   try {
     const { imageBase64, mimeType = 'image/jpeg', fileName = 'documento.jpg' } = req.body;
@@ -52,57 +51,91 @@ app.post('/api/vision-ocr', async (req, res) => {
       return res.status(400).json({ error: 'Parâmetro imageBase64 é obrigatório' });
     }
 
-    // Limpar o prefixo data:image/... se presente
+    let cleanUrl = imageBase64;
+    if (!cleanUrl.startsWith('data:')) {
+      cleanUrl = `data:${mimeType};base64,${imageBase64}`;
+    }
+
+    // 1. Tentar chamar o motor multimodal local Qwen2-VL (http://127.0.0.1:8089)
+    try {
+      const systemPrompt = `Você é um perito em análise visual de documentos de Registro Civil e Medicina Legal (Declaração de Óbito - D.O. do Ministério da Saúde do Brasil, Certidão de Óbito e RG).
+Analise a imagem deste documento com extrema precisão óptica e responda no formato JSON estruturado com a seguinte estrutura:
+
+{
+  "classification": {
+    "type": "DECLARACAO_OBITO" | "CERTIDAO_OBITO" | "RG_IDENTIDADE" | "OUTRO",
+    "typeName": "Declaração de Óbito (D.O. Física)" | "Certidão de Registro Civil" | "Documento Divergente",
+    "confidence": 98,
+    "isCompatibleDO": true | false,
+    "reason": "Descrição da validação do documento"
+  },
+  "fields": [
+    {
+      "field": "numeroDO",
+      "label": "Número da D.O.",
+      "value": "12345678-9",
+      "confidence": 96,
+      "box_2d": [ymin, xmin, ymax, xmax]
+    }
+  ],
+  "fullTranscribedText": "Texto transcrito integralmente"
+}
+
+Extraia todos os campos presentes: numeroDO, nomeFalecido, cpf, rg, rgOrgaoEmissor, dataNascimento, sexo, corRaca, estadoCivil, dataCasamento, nomeConjuge, nomeMae, nomePai, dataObito, horaObito, localObito, tipoLocal, municipioObito, ufObito, causaMortis, cid10, nomeMedico, crmMedico, ufCrm, sepultamentoCremacao, cemiterio, deixouBens, deixouTestamento, deixouFilhos, qtdFilhos, nomesFilhos, nomeDeclarante, qualificacaoDeclarante.
+Responda APENAS com o objeto JSON sem introduções ou explicações fora do JSON.`;
+
+      const localPayload = {
+        model: 'qwen2-vl',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: 'Analise a imagem da Declaração de Óbito, extraia todos os campos e calcule as bounding boxes normalizadas [ymin, xmin, ymax, xmax] em escala 0-1000.' },
+              { type: 'image_url', image_url: { url: cleanUrl } }
+            ]
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 2000
+      };
+
+      const localRes = await fetch('http://127.0.0.1:8089/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(localPayload),
+        signal: AbortSignal.timeout(45000)
+      });
+
+      if (localRes.ok) {
+        const localData = await localRes.json();
+        const content = localData.choices?.[0]?.message?.content || '{}';
+        const cleaned = content.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim();
+        const parsed = JSON.parse(cleaned);
+
+        return res.json({
+          success: true,
+          source: 'Qwen2-VL-2B Multimodal (Local Edge)',
+          data: parsed
+        });
+      }
+    } catch (localErr: any) {
+      console.log('[server] Motor Qwen2-VL local não disponível no momento, testando fallback:', localErr.message);
+    }
+
+    // 2. Fallback para Gemini se chave configurada
     const cleanBase64 = imageBase64.replace(/^data:image\/[a-zA-Z0-9+]+;base64,/, '');
     const ai = getGeminiClient();
 
     if (!ai) {
-      // Se a chave GEMINI_API_KEY não estiver no ambiente, retorna sinal para usar motor local
       return res.status(200).json({
         fallbackToLocal: true,
-        message: 'GEMINI_API_KEY não configurada no servidor. Utilizando motor local de visão computacional.'
+        message: 'Servidor Qwen2-VL offline e GEMINI_API_KEY não configurada. Utilizando OCR gráfico local.'
       });
     }
 
-    const systemPrompt = `Você é um especialista em Visão Computacional e análise de documentos oficiais de Registro Civil e Medicina Legal (Declarações de Óbito do Ministério da Saúde do Brasil, Certidões de Registro Civil e Documentos de Identidade).
-Analise a imagem deste documento com extrema precisão óptica e responda no formato JSON estruturado:
-
-1. CLASSIFICAÇÃO DE DOCUMENTO:
-- Tipo: DECLARACAO_OBITO (D.O. física / Guia Amarela do Ministério da Saúde), CERTIDAO_OBITO (Certidão de Cartório / Livro C pós-lavratura), ou RG_IDENTIDADE (Carteira de Identidade civil).
-- Compatível: Apenas DECLARACAO_OBITO é compatível como via preliminar para lavratura. Se for CERTIDAO_OBITO ou RG, informe que não é a D.O. física.
-
-2. EXTRAÇÃO DE ENTIDADES:
-Para cada campo presente, extraia o valor legível e determine as coordenadas da Bounding Box (caixa delimitadora) [ymin, xmin, ymax, xmax] normalizadas em uma escala de 0 a 1000 (onde 0,0 é o canto superior esquerdo e 1000,1000 é o canto inferior direito da imagem).
-Campos a extrair:
-- numeroDO: Número impresso da Declaração de Óbito
-- nomeFalecido: Nome completo do falecido
-- cpf: CPF do falecido
-- rg: RG do falecido
-- rgOrgaoEmissor: Órgão expedidor
-- dataNascimento: DD/MM/AAAA
-- sexo: 'M', 'F' ou 'I'
-- corRaca: 'BRANCA', 'PRETA', 'PARDA', 'AMARELA', 'INDIGENA'
-- estadoCivil: 'SOLTEIRO', 'CASADO', 'VIUVO', 'VIUVA', 'DIVORCIADO', 'SEPARADO_JUDICIALMENTE'
-- nomeMae: Nome completo da mãe
-- nomePai: Nome completo do pai
-- dataObito: DD/MM/AAAA da morte
-- horaObito: HH:MM
-- localObito: Estabelecimento / Hospital / Endereço
-- tipoLocal: 'HOSPITAL', 'DOMICILIO', 'VIA_PUBLICA', 'OUTROS'
-- municipioObito: Cidade do falecimento
-- ufObito: UF (ex: SC, SP, RJ)
-- causaMortis: Causa da morte completa (parte I linhas a, b, c, d e parte II)
-- cid10: Código CID-10 informado
-- nomeMedico: Nome completo do médico atestante
-- crmMedico: Número do CRM
-- ufCrm: UF do CRM
-- sepultamentoCremacao: 'SEPULTAMENTO' ou 'CREMACAO'
-- cemiterio: Nome do cemitério ou crematório
-- deixouBens: 'SIM', 'NAO' ou 'IGNORADO'
-- deixouTestamento: 'SIM', 'NAO' ou 'IGNORADO'
-- deixouFilhos: 'SIM', 'NAO' ou 'IGNORADO'
-- qtdFilhos: Número de filhos
-- nomeDeclarante: Nome do declarante`;
+    const systemPrompt = `Você é um especialista em Visão Computacional e análise de documentos oficiais de Registro Civil e Medicina Legal.
+Analise a imagem deste documento com extrema precisão óptica e responda no formato JSON estruturado com classificação e campos com bounding boxes [ymin, xmin, ymax, xmax] normalizados de 0 a 1000.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-flash-latest',
@@ -113,49 +146,11 @@ Campos a extrair:
             mimeType: mimeType.includes('pdf') ? 'application/pdf' : mimeType
           }
         },
-        {
-          text: 'Execute o OCR completo de visão computacional detectando todas as entidades e suas respectivas bounding boxes [ymin, xmin, ymax, xmax] em escala 0-1000.'
-        }
+        { text: 'Execute o OCR completo de visão computacional detectando todas as entidades e suas respectivas bounding boxes [ymin, xmin, ymax, xmax] em escala 0-1000.' }
       ],
       config: {
         systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            classification: {
-              type: Type.OBJECT,
-              properties: {
-                type: { type: Type.STRING },
-                typeName: { type: Type.STRING },
-                confidence: { type: Type.NUMBER },
-                isCompatibleDO: { type: Type.BOOLEAN },
-                reason: { type: Type.STRING }
-              },
-              required: ['type', 'typeName', 'confidence', 'isCompatibleDO']
-            },
-            fields: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  field: { type: Type.STRING },
-                  label: { type: Type.STRING },
-                  value: { type: Type.STRING },
-                  confidence: { type: Type.NUMBER },
-                  box_2d: {
-                    type: Type.ARRAY,
-                    items: { type: Type.NUMBER },
-                    description: '[ymin, xmin, ymax, xmax] normalizados de 0 a 1000'
-                  }
-                },
-                required: ['field', 'label', 'value', 'confidence', 'box_2d']
-              }
-            },
-            fullTranscribedText: { type: Type.STRING }
-          },
-          required: ['classification', 'fields']
-        }
+        responseMimeType: 'application/json'
       }
     });
 
@@ -164,7 +159,7 @@ Campos a extrair:
 
     return res.json({
       success: true,
-      source: 'Vision LLM (Gemini 2.5 Flash Multimodal)',
+      source: 'Vision LLM (Gemini 2.5 Flash Multimodal Fallback)',
       data: parsedResult
     });
   } catch (error: any) {
@@ -181,8 +176,45 @@ Campos a extrair:
 app.post('/api/llm/justification', async (req, res) => {
   try {
     const { ruleTitle, legalReference, diffSummary, declaracao, ocr } = req.body;
-    const ai = getGeminiClient();
 
+    // 1. Tentar servidor local Qwen2-VL
+    try {
+      const prompt = `Como assistente jurídico de Registro Civil especializado na Lei 6.015/73 e no Provimento CNJ nº 149/2023, redija uma fundamentação jurídica formal e concisa para superar a seguinte inconformidade de pré-lavratura de óbito:
+Regra: ${ruleTitle}
+Fundamento Legal: ${legalReference}
+Divergência detectada: ${diffSummary}
+Falecido: ${declaracao?.nomeFalecido || 'Falecido'} (D.O. nº ${declaracao?.numeroDO || 'S/N'})
+
+Redija em 1 ou 2 parágrafos formais e diretos adequados para inserção no livro de assentamentos ou despacho do oficial.`;
+
+      const localRes = await fetch('http://127.0.0.1:8089/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'qwen2-vl',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 350
+        }),
+        signal: AbortSignal.timeout(15000)
+      });
+
+      if (localRes.ok) {
+        const localData = await localRes.json();
+        const justification = localData.choices?.[0]?.message?.content?.trim();
+        if (justification) {
+          return res.json({
+            success: true,
+            justification,
+            source: 'Qwen2-VL-2B (Local Edge)'
+          });
+        }
+      }
+    } catch (e) {
+      //
+    }
+
+    const ai = getGeminiClient();
     if (!ai) {
       return res.json({ fallbackToLocal: true });
     }
@@ -191,9 +223,7 @@ app.post('/api/llm/justification', async (req, res) => {
 Regra: ${ruleTitle}
 Fundamento Legal: ${legalReference}
 Divergência detectada: ${diffSummary}
-Falecido: ${declaracao?.nomeFalecido || 'Falecido'} (D.O. nº ${declaracao?.numeroDO || 'S/N'})
-
-Redija em 1 ou 2 parágrafos formais e diretos adequados para inserção no livro de assentamentos ou despacho do oficial.`;
+Falecido: ${declaracao?.nomeFalecido || 'Falecido'} (D.O. nº ${declaracao?.numeroDO || 'S/N'})`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-flash-latest',

@@ -77,6 +77,7 @@ export interface DocumentValidationResult {
   typeName: string;
   confidence: number; // 0-100
   isCompatibleDO: boolean;
+  reason?: string;
   warningBanner?: DocumentClassificationWarning;
 }
 
@@ -318,6 +319,30 @@ export interface LLMMinutaResult {
   message?: string;
 }
 
+export interface LLMOCRResult {
+  success: boolean;
+  source?: string;
+  durationMs?: number;
+  data?: {
+    classification?: {
+      type: string;
+      typeName: string;
+      confidence: number;
+      isCompatibleDO: boolean;
+      reason?: string;
+    };
+    fields?: Array<{
+      field: string;
+      label: string;
+      value: string;
+      confidence: number;
+      box_2d: [number, number, number, number];
+    }>;
+    fullTranscribedText?: string;
+  };
+  error?: string;
+}
+
 declare global {
   interface Window {
     electronAPI?: {
@@ -349,6 +374,11 @@ declare global {
       };
 
       llm?: {
+        processOCR: (params: {
+          imageBase64: string;
+          mimeType?: string;
+          fileName?: string;
+        }) => Promise<LLMOCRResult>;
         generateJustification: (params: {
           ruleId: string;
           ruleTitle: string;

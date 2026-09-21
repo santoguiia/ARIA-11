@@ -5,13 +5,15 @@ import {
   OCRConfidenceMap, 
   OCRDocumentState, 
   OCRFieldExtraction, 
-  OCRBoundingBox 
+  OCRBoundingBox,
+  DocumentValidationResult 
 } from '../types';
 import { 
   classifyDocumentType, 
   extractEntitiesWithAnchorOCR, 
   OCRWord 
 } from './anchorOcrEngine';
+import { requestLLMOCR } from './llmClient';
 
 // Set up PDF.js worker if in browser
 if (typeof window !== 'undefined') {
@@ -569,32 +571,27 @@ export async function processUploadedOCRFile(
   // 1. Obter dimensões nativas reais da imagem carregada
   const dimensions = await getImageDimensions(imageUrl);
 
-  // 2. Tentar processamento primário com Vision LLM (Multimodal)
-  onProgress?.('Enviando documento para LLM com Visão Computacional...', 30);
+  // 2. Tentar processamento primário com Vision LLM (Multimodal Qwen2-VL)
+  onProgress?.('Enviando documento para o motor multimodal local (Qwen2-VL)...', 30);
   let visionSuccess = false;
   let visionData: any = null;
+  let visionSource = 'Qwen2-VL-2B Multimodal (Local Edge)';
 
   try {
-    const res = await fetch('/api/vision-ocr', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        imageBase64: imageUrl,
-        mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
-        fileName: file.name
-      })
+    const ocrRes = await requestLLMOCR({
+      imageBase64: imageUrl,
+      mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
+      fileName: file.name
     });
 
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.data && json.data.fields && json.data.fields.length > 0) {
-        visionSuccess = true;
-        visionData = json.data;
-        onProgress?.('Vision LLM mapeou campos e Bounding Boxes com sucesso...', 80);
-      }
+    if (ocrRes.success && ocrRes.data && ocrRes.data.fields && ocrRes.data.fields.length > 0) {
+      visionSuccess = true;
+      visionData = ocrRes.data;
+      if (ocrRes.source) visionSource = ocrRes.source;
+      onProgress?.('Motor multimodal mapeou campos e coordenadas com sucesso...', 80);
     }
   } catch (visionErr) {
-    console.warn('Vision LLM indisponível ou offline. Alternando para OCR Local:', visionErr);
+    console.warn('Motor multimodal indisponível ou offline. Alternando para OCR Local:', visionErr);
   }
 
   // 3. FLUXO A: VISION LLM MULTIMODAL PROCESSOU O ARQUIVO
@@ -670,7 +667,7 @@ export async function processUploadedOCRFile(
           pixelX1,
           pixelY1
         },
-        anchorMatched: 'Vision LLM (Detecção Óptica Multimodal)'
+        matchedAnchor: 'Vision LLM (Detecção Óptica Multimodal)'
       };
 
       (extractedRecord as any)[fieldKey] = item.value;
@@ -745,7 +742,7 @@ export async function processUploadedOCRFile(
       timestamp: new Date().toLocaleTimeString('pt-BR'),
       imageDimensions: dimensions,
       classification,
-      engine: 'Vision LLM (Multimodal)'
+      engine: visionSource
     };
 
     return {

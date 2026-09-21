@@ -186,9 +186,20 @@ ipcMain.handle('llm:get-status', async () => {
   return llmEngine.getStatus();
 });
 
+ipcMain.handle('llm:process-ocr', async (event, params) => {
+  if (!llmEngine) {
+    return { success: false, message: 'Motor multimodal LLM não inicializado.' };
+  }
+  try {
+    return await llmEngine.processOCR(params);
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 ipcMain.handle('llm:unload', async () => {
   if (!llmEngine) return { success: false };
-  await llmEngine.unloadModel('Comando explícito do operador');
+  await llmEngine.shutdown();
   return { success: true };
 });
 
@@ -270,9 +281,15 @@ ipcMain.handle('get-node-status', async () => {
   };
 });
 
+app.on('before-quit', () => {
+  if (llmEngine) {
+    llmEngine.shutdown();
+  }
+});
+
 app.on('window-all-closed', () => {
   if (llmEngine) {
-    llmEngine.unloadModel('Encerramento da aplicação');
+    llmEngine.shutdown();
   }
   if (process.platform !== 'darwin') {
     app.quit();

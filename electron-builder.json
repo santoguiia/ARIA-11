@@ -13,8 +13,7 @@
   "extraResources": [
     {
       "from": "resources/models",
-      "to": "models",
-      "filter": ["Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", "*.gguf", "*.json"]
+      "to": "models"
     }
   ],
   "asar": true,

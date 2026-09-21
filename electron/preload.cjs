@@ -19,8 +19,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     heartbeat: () => ipcRenderer.invoke('license:heartbeat')
   },
 
-  // Módulo de LLM Local Embutida (Qwen2.5-1.5B via node-llama-cpp)
+  // Módulo de LLM/VLM Local Embutida (Qwen2-VL-2B Multimodal via llama.exe)
   llm: {
+    processOCR: (params) => ipcRenderer.invoke('llm:process-ocr', params),
     generateJustification: (params) => ipcRenderer.invoke('llm:generate-justification', params),
     draftMinuta: (params) => ipcRenderer.invoke('llm:draft-minuta', params),
     getStatus: () => ipcRenderer.invoke('llm:get-status'),
