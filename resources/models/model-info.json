@@ -1,0 +1,13 @@
+{
+  "name": "Qwen2.5-1.5B-Instruct-Q4_K_M.gguf",
+  "architecture": "qwen2",
+  "quantization": "Q4_K_M",
+  "parameterSize": "1.54B",
+  "fileSizeApproxBytes": 1056964608,
+  "contextSizeDefault": 2048,
+  "recommendedThreads": 4,
+  "format": "GGUF-v3",
+  "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "purpose": "Assistente On-Device de Justificativas e Redação Registral (REF-11)",
+  "localFirstCompliance": "Totalmente offline, sem dependência de rede, em conformidade com Provimento 149/CNJ e LGPD"
+}

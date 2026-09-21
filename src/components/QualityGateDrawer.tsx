@@ -15,9 +15,13 @@ import {
   ChevronRight,
   ChevronDown,
   Sparkles,
-  ExternalLink
+  ExternalLink,
+  Cpu,
+  RefreshCw
 } from 'lucide-react';
-import { RuleEvaluationResult, RuleSeverity } from '../types';
+import { RuleEvaluationResult, RuleSeverity, DeathRecordData, LicenseInfo, LicenseTier } from '../types';
+import { DiffHighlight } from '../engine/diffHighlight';
+import { requestLLMJustification } from '../engine/llmClient';
 
 interface QualityGateDrawerProps {
   results: RuleEvaluationResult[];
@@ -28,6 +32,12 @@ interface QualityGateDrawerProps {
   onUpdateJustification: (ruleId: string, text: string) => void;
   onLavrarAto: () => void;
   onOpenAuditModal: () => void;
+  onApplySuggestedFix?: (field: keyof DeathRecordData, value: string) => void;
+  license?: LicenseInfo | null;
+  onTriggerUpgradeAlert?: (requiredTier: LicenseTier) => void;
+  declaracao?: DeathRecordData;
+  ocr?: DeathRecordData;
+  federada?: DeathRecordData;
 }
 
 export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
@@ -38,10 +48,57 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
   justifications,
   onUpdateJustification,
   onLavrarAto,
-  onOpenAuditModal
+  onOpenAuditModal,
+  onApplySuggestedFix,
+  license,
+  onTriggerUpgradeAlert,
+  declaracao,
+  ocr,
+  federada
 }) => {
   const [filter, setFilter] = useState<'TODAS' | 'FALHAS' | 'BLOQUEIO' | 'ALERTA'>('TODAS');
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
+  const [generatingJustificationMap, setGeneratingJustificationMap] = useState<Record<string, boolean>>({});
+  const [llmMetaMap, setLlmMetaMap] = useState<Record<string, { source: string; durationMs: number }>>({});
+
+  const handleRequestAIJustification = async (item: RuleEvaluationResult) => {
+    // Verificação de Feature Flag da Licença
+    if (license && !license.canUseLocalLLM) {
+      onTriggerUpgradeAlert?.('PRO_AI');
+      return;
+    }
+
+    setGeneratingJustificationMap((prev) => ({ ...prev, [item.ruleId]: true }));
+
+    try {
+      const res = await requestLLMJustification({
+        ruleId: item.ruleId,
+        ruleTitle: item.ruleTitle,
+        legalReference: item.legalReference,
+        diffSummary: item.message,
+        declaracao: declaracao || ({} as DeathRecordData),
+        ocr: ocr || ({} as DeathRecordData),
+        federada: federada || ({} as DeathRecordData)
+      });
+
+      if (res.success && res.justification) {
+        onUpdateJustification(item.ruleId, res.justification);
+        setLlmMetaMap((prev) => ({
+          ...prev,
+          [item.ruleId]: {
+            source: res.source || 'Qwen2.5-1.5B (GGUF On-Device)',
+            durationMs: res.durationMs || 450
+          }
+        }));
+      } else if (res.error === 'UPGRADE_REQUIRED') {
+        onTriggerUpgradeAlert?.('PRO_AI');
+      }
+    } catch (err) {
+      console.warn('Erro ao gerar justificativa:', err);
+    } finally {
+      setGeneratingJustificationMap((prev) => ({ ...prev, [item.ruleId]: false }));
+    }
+  };
 
   const impedientes = results.filter(r => !r.passed && r.severity === 'BLOQUEIO_IMPEDIENTE');
   const alertas = results.filter(r => !r.passed && r.severity === 'ALERTA_OBRIGATORIO');
@@ -227,22 +284,38 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
                   {/* Provenance comparison table */}
                   {item.sourcesCompared && item.sourcesCompared.length > 0 && (
                     <div className="bg-slate-950/70 rounded p-2 border border-slate-800 space-y-1">
-                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                        Proveniência dos Dados Confrontados:
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1 flex items-center justify-between">
+                        <span>Proveniência dos Dados Confrontados:</span>
+                        {!item.passed && item.sourcesCompared.length >= 2 && (
+                          <span className="text-[9px] font-mono text-rose-400 bg-rose-950/60 px-1 rounded border border-rose-800">
+                            Divergência em vermelho
+                          </span>
+                        )}
                       </div>
-                      {item.sourcesCompared.map((src, idx) => (
-                        <div key={idx} className="flex items-center justify-between text-[11px]">
-                          <span className="text-slate-400 font-medium">
-                            {src.sourceName} <span className="text-slate-500 font-mono">({src.field})</span>:
-                          </span>
-                          <span className="font-mono text-slate-200 bg-slate-900 px-1 rounded truncate max-w-[200px]">
-                            {src.value || '(Vazio)'}
-                            {src.confidence !== undefined && (
-                              <span className="ml-1 text-[9px] text-amber-400">[{src.confidence}%]</span>
-                            )}
-                          </span>
-                        </div>
-                      ))}
+                      {item.sourcesCompared.map((src, idx) => {
+                        // Compare against the primary or adjacent source to highlight discrepancy in red
+                        const compareTarget = idx === 0 
+                          ? (item.sourcesCompared[1]?.value || '') 
+                          : (item.sourcesCompared[0]?.value || '');
+
+                        return (
+                          <div key={idx} className="flex items-center justify-between text-[11px]">
+                            <span className="text-slate-400 font-medium">
+                              {src.sourceName} <span className="text-slate-500 font-mono">({src.field})</span>:
+                            </span>
+                            <span className="font-mono text-slate-200 bg-slate-900 px-1.5 py-0.5 rounded truncate max-w-[210px] border border-slate-800">
+                              {!item.passed && compareTarget ? (
+                                <DiffHighlight current={src.value || '(Vazio)'} reference={compareTarget} />
+                              ) : (
+                                src.value || '(Vazio)'
+                              )}
+                              {src.confidence !== undefined && (
+                                <span className="ml-1 text-[9px] text-amber-400">[{src.confidence}%]</span>
+                              )}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
 
@@ -252,10 +325,24 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
                     <span>Fundamento Legal: <strong className="text-slate-300">{item.legalReference}</strong></span>
                   </div>
 
+                  {/* 1-Click Suggested Fix Action */}
+                  {!item.passed && item.suggestedFix && onApplySuggestedFix && (
+                    <div className="pt-1">
+                      <button
+                        type="button"
+                        onClick={() => onApplySuggestedFix(item.suggestedFix!.field, item.suggestedFix!.value)}
+                        className="w-full py-1.5 px-3 bg-emerald-900/80 hover:bg-emerald-800 border border-emerald-600 text-emerald-100 rounded text-xs font-semibold transition-colors flex items-center justify-center space-x-2 shadow-sm"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-emerald-300 shrink-0" />
+                        <span>{item.suggestedFix.label}</span>
+                      </button>
+                    </div>
+                  )}
+
                   {/* Justification Field for ALERTA_OBRIGATORIO */}
                   {item.severity === 'ALERTA_OBRIGATORIO' && !item.passed && (
-                    <div className="mt-2 pt-2 border-t border-amber-800/40 bg-amber-950/30 p-2.5 rounded border border-amber-800/60">
-                      <div className="flex items-center justify-between mb-1">
+                    <div className="mt-2 pt-2 border-t border-amber-800/40 bg-amber-950/30 p-2.5 rounded border border-amber-800/60 space-y-2">
+                      <div className="flex items-center justify-between">
                         <label className="text-[11px] font-bold text-amber-300 flex items-center space-x-1">
                           <FileSignature className="w-3 h-3 text-amber-400" />
                           <span>Justificativa Obrigatória do Escrevente:</span>
@@ -266,13 +353,57 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
                           {justification.length}/10 caracteres mín.
                         </span>
                       </div>
+
                       <textarea
                         rows={2}
                         value={justification}
                         onChange={(e) => onUpdateJustification(item.ruleId, e.target.value)}
                         placeholder="Ex: Apresentada certidão retificadora de casamento nº 14092 expedida em 2024 que comprova a divergência de grafia..."
-                        className="w-full bg-slate-950 border border-amber-700/80 rounded p-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400 resize-none font-sans"
+                        className="w-full bg-slate-950 border border-amber-700/80 rounded p-1.5 text-xs text-white placeholder-slate-500 focus:outline-hidden focus:border-amber-400 resize-none font-sans"
                       />
+
+                      {/* AI Copilot Suggestion Button */}
+                      <div className="flex items-center justify-between pt-0.5">
+                        <button
+                          type="button"
+                          onClick={() => handleRequestAIJustification(item)}
+                          disabled={generatingJustificationMap[item.ruleId]}
+                          className={`py-1 px-2.5 rounded text-[11px] font-semibold flex items-center space-x-1.5 transition-all shadow-xs ${
+                            license && !license.canUseLocalLLM
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                              : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40'
+                          }`}
+                          title={
+                            license && !license.canUseLocalLLM
+                              ? 'Requer Licença Pro AI ou superior. Clique para ver detalhes.'
+                              : 'Gerar minuta de motivação com modelo Qwen2.5-1.5B local on-device (sem enviar à nuvem)'
+                          }
+                        >
+                          {generatingJustificationMap[item.ruleId] ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin text-amber-400" />
+                              <span>Inferindo com Qwen2.5 local...</span>
+                            </>
+                          ) : (
+                            <>
+                              {license && !license.canUseLocalLLM ? (
+                                <Lock className="w-3 h-3 text-slate-400" />
+                              ) : (
+                                <Cpu className="w-3 h-3 text-amber-400" />
+                              )}
+                              <span>Sugerir com IA Local (Qwen 1.5B)</span>
+                            </>
+                          )}
+                        </button>
+
+                        {llmMetaMap[item.ruleId] && (
+                          <span className="text-[10px] text-emerald-400 flex items-center space-x-1 font-mono">
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Qwen 1.5B ({llmMetaMap[item.ruleId].durationMs}ms)</span>
+                          </span>
+                        )}
+                      </div>
+
                       {hasSufficientJustification ? (
                         <div className="flex items-center space-x-1 text-[10px] text-emerald-400 mt-1">
                           <CheckCircle2 className="w-3 h-3" />

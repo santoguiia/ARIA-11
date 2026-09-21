@@ -25,20 +25,32 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
     evaluate: (decl, ocr, ocrConf, fed) => {
       const res = validateCPF(decl.cpf);
       if (!res.valid) {
+        let explanation = `CPF informado '${decl.cpf}' é matematicamente inválido: ${res.error}.`;
+        if (res.expectedCheckDigits && res.suggestedValidCPF) {
+          explanation = `CPF '${decl.cpf}' é matematicamente inválido: ${res.error}. Pelo algoritmo oficial Módulo 11 da Receita Federal, o final correto para esta raiz numérica é '-${res.expectedCheckDigits}' (${res.suggestedValidCPF}).`;
+        }
+
         return {
           passed: false,
-          message: `CPF informado '${decl.cpf}' é matematicamente inválido: ${res.error || 'Dígito verificador incorreto'}.`,
+          message: explanation,
           sourcesCompared: [
             { sourceName: 'Declaração Preliminar', field: 'CPF', value: decl.cpf },
             { sourceName: 'OCR DO/RG', field: 'CPF', value: ocr.cpf, confidence: ocrConf.cpf },
             { sourceName: 'Base Federada (RFB)', field: 'CPF', value: fed.cpf }
           ],
-          diffSummary: `O CPF ${decl.cpf} não atende ao algoritmo do Ministério da Fazenda.`
+          diffSummary: res.suggestedValidCPF 
+            ? `Dígitos verificadores calculados pelo Módulo 11 da RFB: -${res.expectedCheckDigits} (sugerido: ${res.suggestedValidCPF})`
+            : `O CPF ${decl.cpf} não atende ao algoritmo do Ministério da Fazenda.`,
+          suggestedFix: res.suggestedValidCPF ? {
+            field: 'cpf',
+            value: res.suggestedValidCPF,
+            label: `Corrigir CPF para ${res.suggestedValidCPF}`
+          } : undefined
         };
       }
       return {
         passed: true,
-        message: 'CPF válido e verificado com sucesso.',
+        message: 'CPF válido e verificado com sucesso pelo algoritmo oficial da Receita Federal (Módulo 11).',
         sourcesCompared: [
           { sourceName: 'Declaração Preliminar', field: 'CPF', value: decl.cpf },
           { sourceName: 'Base Federada', field: 'CPF', value: fed.cpf }
@@ -89,6 +101,65 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
         sourcesCompared: [
           { sourceName: 'Declaração', field: 'CPF', value: decl.cpf },
           { sourceName: 'Base Federada', field: 'CPF', value: fed.cpf }
+        ]
+      };
+    }
+  },
+  {
+    id: 'QG-DOC-001',
+    title: 'CrossCheck de Documento de Identidade (RG e Órgão Emissor)',
+    category: 'IDENTIFICACAO',
+    severity: 'ALERTA_OBRIGATORIO',
+    legalReference: 'Lei nº 6.015/1973, Art. 80 (Elementos essenciais do assento) e Provimento CNJ nº 149/2023',
+    description: 'Confronta o número do RG e o órgão expedidor/UF entre a declaração preliminar, o OCR da DO física e o acervo civil federado.',
+    evaluate: (decl, ocr, ocrConf, fed) => {
+      const cleanDeclRg = (decl.rg || '').replace(/\D/g, '');
+      const cleanFedRg = (fed.rg || '').replace(/\D/g, '');
+      const cleanDeclEmissor = (decl.rgOrgaoEmissor || '').trim().toUpperCase();
+      const cleanFedEmissor = (fed.rgOrgaoEmissor || '').trim().toUpperCase();
+
+      if (cleanDeclRg && cleanFedRg && cleanDeclRg !== cleanFedRg) {
+        return {
+          passed: false,
+          message: `Divergência substantiva de RG: Declaração consta '${decl.rg}', mas a Base Centralizada registra '${fed.rg}'.`,
+          sourcesCompared: [
+            { sourceName: 'Declaração Preliminar', field: 'RG', value: `${decl.rg} (${decl.rgOrgaoEmissor})` },
+            { sourceName: 'Base Federada (CRC)', field: 'RG', value: `${fed.rg} (${fed.rgOrgaoEmissor})` },
+            { sourceName: 'OCR DO/RG', field: 'RG', value: `${ocr.rg} (${ocr.rgOrgaoEmissor})`, confidence: ocrConf.rg }
+          ],
+          diffSummary: `Declaração (${decl.rg}) ≠ Base Federada (${fed.rg}).`,
+          suggestedFix: {
+            field: 'rg',
+            value: fed.rg,
+            label: `Atualizar RG para ${fed.rg}`
+          }
+        };
+      }
+
+      if (cleanDeclEmissor && cleanFedEmissor && cleanDeclEmissor !== cleanFedEmissor) {
+        return {
+          passed: false,
+          message: `Divergência de Órgão Expedidor do RG: Declaração consta '${decl.rgOrgaoEmissor}', mas na Base Oficial Centralizada consta '${fed.rgOrgaoEmissor}'.`,
+          sourcesCompared: [
+            { sourceName: 'Declaração Preliminar', field: 'Órgão Emissor', value: decl.rgOrgaoEmissor },
+            { sourceName: 'Base Federada (CRC)', field: 'Órgão Emissor', value: fed.rgOrgaoEmissor },
+            { sourceName: 'OCR DO/RG', field: 'Órgão Emissor', value: ocr.rgOrgaoEmissor }
+          ],
+          diffSummary: `Órgão Emissor: '${decl.rgOrgaoEmissor}' ≠ '${fed.rgOrgaoEmissor}'.`,
+          suggestedFix: {
+            field: 'rgOrgaoEmissor',
+            value: fed.rgOrgaoEmissor,
+            label: `Atualizar Órgão Emissor para ${fed.rgOrgaoEmissor}`
+          }
+        };
+      }
+
+      return {
+        passed: true,
+        message: 'Documento de Identidade (RG e Órgão Expedidor) validado e concordante.',
+        sourcesCompared: [
+          { sourceName: 'Declaração', field: 'RG / Órgão', value: `${decl.rg} (${decl.rgOrgaoEmissor})` },
+          { sourceName: 'Base Federada', field: 'RG / Órgão', value: `${fed.rg} (${fed.rgOrgaoEmissor})` }
         ]
       };
     }
@@ -199,7 +270,12 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
             { sourceName: 'Base Federada / Declaração', field: 'Data Casamento', value: dataCasamento },
             { sourceName: 'Declaração', field: 'Data Óbito', value: decl.dataObito }
           ],
-          diffSummary: `Casamento (${dataCasamento}) > Óbito (${decl.dataObito}).`
+          diffSummary: `Casamento (${dataCasamento}) > Óbito (${decl.dataObito}).`,
+          suggestedFix: fed.dataCasamento && parseDate(fed.dataCasamento) && parseDate(fed.dataCasamento)!.getTime() <= dObito.getTime() ? {
+            field: 'dataCasamento',
+            value: fed.dataCasamento,
+            label: `Harmonizar com Base Federada: ${fed.dataCasamento}`
+          } : undefined
         };
       }
 
@@ -286,7 +362,12 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
             { sourceName: 'Declaração Preliminar', field: 'Nome Mãe', value: decl.nomeMae },
             { sourceName: 'Base Federada (CRC)', field: 'Nome Mãe', value: fed.nomeMae }
           ],
-          diffSummary: `Similaridade de ${Math.round(sim * 100)}% (ex: acentuação, grafia com 'Z' ou 'S').`
+          diffSummary: `Similaridade de ${Math.round(sim * 100)}% (ex: acentuação, grafia com 'Z' ou 'S').`,
+          suggestedFix: {
+            field: 'nomeMae',
+            value: fed.nomeMae,
+            label: `Harmonizar grafia com CRC: "${fed.nomeMae}"`
+          }
         };
       }
 
@@ -367,7 +448,12 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
             { sourceName: 'Base Federada (CRC)', field: 'Estado Civil', value: fed.estadoCivil },
             { sourceName: 'Base Federada (CRC)', field: 'Cônjuge', value: fed.nomeConjuge || 'Sim' }
           ],
-          diffSummary: 'Declaração = SOLTEIRO | Base Federada = CASADO (Livro B).'
+          diffSummary: 'Declaração = SOLTEIRO | Base Federada = CASADO (Livro B).',
+          suggestedFix: {
+            field: 'estadoCivil',
+            value: 'CASADO',
+            label: 'Atualizar Estado Civil para CASADO (conforme Livro B)'
+          }
         };
       }
 
@@ -486,6 +572,34 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
       };
     }
   },
+  {
+    id: 'QG-CEM-001',
+    title: 'Indicação de Sepultamento ou Cremação e Cemitério',
+    category: 'MEDICO_LEGAL',
+    severity: 'BLOQUEIO_IMPEDIENTE',
+    legalReference: 'Lei nº 6.015/1973, Art. 80, 4º e Art. 77, § 2º (Lugar do sepultamento)',
+    description: 'O assento de óbito deve conter obrigatoriamente a declaração expressa do lugar onde o cadáver foi sepultado ou cremado.',
+    evaluate: (decl) => {
+      if (!decl.cemiterio || decl.cemiterio.trim().length < 3) {
+        return {
+          passed: false,
+          message: 'Cemitério ou crematório de destinação do cadáver não informado. Requisito legal obrigatório para lavratura.',
+          sourcesCompared: [
+            { sourceName: 'Declaração Preliminar', field: 'Cemitério', value: decl.cemiterio || '(Vazio)' }
+          ],
+          diffSummary: 'Ausência do local de sepultamento/cremação.'
+        };
+      }
+      return {
+        passed: true,
+        message: `Destinação do cadáver definida: ${decl.sepultamentoCremacao} no ${decl.cemiterio}.`,
+        sourcesCompared: [
+          { sourceName: 'Declaração', field: 'Cemitério', value: decl.cemiterio },
+          { sourceName: 'Declaração', field: 'Destinação', value: decl.sepultamentoCremacao }
+        ]
+      };
+    }
+  },
 
   // -------------------------------------------------------------
   // GRUPO: INFORMATIVOS E OBRIGAÇÕES ACESSÓRIAS
@@ -595,6 +709,7 @@ export function evaluateQualityGate(
       legalReference: rule.legalReference,
       sourcesCompared: evalRes.sourcesCompared,
       diffSummary: evalRes.diffSummary,
+      suggestedFix: evalRes.suggestedFix,
       requiresJustification,
       operatorJustification
     });

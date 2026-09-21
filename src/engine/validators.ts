@@ -4,46 +4,85 @@
  * e Provimento CNJ nº 149/2023.
  */
 
+export interface CPFValidationResult {
+  valid: boolean;
+  clean: string;
+  error?: string;
+  expectedCheckDigits?: string;
+  suggestedValidCPF?: string;
+  details?: {
+    d1Calculated: number;
+    d1Given: number;
+    d2Calculated: number;
+    d2Given: number;
+  };
+}
+
 /**
  * Validação oficial do CPF (Cadastro de Pessoas Físicas)
- * Algoritmo dos dois dígitos verificadores em Módulo 11.
+ * Algoritmo dos dois dígitos verificadores em Módulo 11 (Ministério da Fazenda / Receita Federal).
  */
-export function validateCPF(cpf: string): { valid: boolean; clean: string; error?: string } {
+export function validateCPF(cpf: string): CPFValidationResult {
   if (!cpf) {
-    return { valid: false, clean: '', error: 'CPF não informado.' };
+    return { valid: false, clean: '', error: 'CPF não informado' };
   }
 
   const clean = cpf.replace(/\D/g, '');
 
   if (clean.length !== 11) {
-    return { valid: false, clean, error: `CPF deve possuir 11 dígitos numéricos (encontrados ${clean.length}).` };
+    return { valid: false, clean, error: `CPF deve possuir 11 dígitos numéricos (encontrados ${clean.length})` };
   }
 
   // Elimina CPFs com todos os dígitos iguais (ex: 111.111.111-11)
   if (/^(\d)\1{10}$/.test(clean)) {
-    return { valid: false, clean, error: 'CPF inválido (sequência de dígitos repetidos).' };
+    return { valid: false, clean, error: 'CPF inválido (sequência de 11 dígitos repetidos)' };
   }
 
-  // Primeiro dígito verificador
-  let soma = 0;
+  // Primeiro dígito verificador (pesos de 10 a 2)
+  let soma1 = 0;
   for (let i = 0; i < 9; i++) {
-    soma += parseInt(clean.charAt(i), 10) * (10 - i);
+    soma1 += parseInt(clean.charAt(i), 10) * (10 - i);
   }
-  let resto = (soma * 10) % 11;
-  if (resto === 10 || resto === 11) resto = 0;
-  if (resto !== parseInt(clean.charAt(9), 10)) {
-    return { valid: false, clean, error: 'Dígito verificador 1 do CPF inconsistente.' };
+  let resto1 = (soma1 * 10) % 11;
+  if (resto1 === 10 || resto1 === 11) resto1 = 0;
+  const d1Calculated = resto1;
+  const d1Given = parseInt(clean.charAt(9), 10);
+
+  // Segundo dígito verificador (pesos de 11 a 3 nos 9 primeiros dígitos, e peso 2 no primeiro dígito verificador calculado)
+  let soma2 = 0;
+  for (let i = 0; i < 9; i++) {
+    soma2 += parseInt(clean.charAt(i), 10) * (11 - i);
+  }
+  soma2 += d1Calculated * 2;
+  let resto2 = (soma2 * 10) % 11;
+  if (resto2 === 10 || resto2 === 11) resto2 = 0;
+  const d2Calculated = resto2;
+  const d2Given = parseInt(clean.charAt(10), 10);
+
+  const expectedCheckDigits = `${d1Calculated}${d2Calculated}`;
+  const suggestedClean = clean.slice(0, 9) + expectedCheckDigits;
+  const suggestedValidCPF = `${suggestedClean.slice(0, 3)}.${suggestedClean.slice(3, 6)}.${suggestedClean.slice(6, 9)}-${expectedCheckDigits}`;
+
+  if (d1Given !== d1Calculated) {
+    return { 
+      valid: false, 
+      clean, 
+      error: `1º dígito verificador inconsistente (calculado: '${d1Calculated}', informado: '${d1Given}')`,
+      expectedCheckDigits,
+      suggestedValidCPF,
+      details: { d1Calculated, d1Given, d2Calculated, d2Given }
+    };
   }
 
-  // Segundo dígito verificador
-  soma = 0;
-  for (let i = 0; i < 10; i++) {
-    soma += parseInt(clean.charAt(i), 10) * (11 - i);
-  }
-  resto = (soma * 10) % 11;
-  if (resto === 10 || resto === 11) resto = 0;
-  if (resto !== parseInt(clean.charAt(10), 10)) {
-    return { valid: false, clean, error: 'Dígito verificador 2 do CPF inconsistente.' };
+  if (d2Given !== d2Calculated) {
+    return { 
+      valid: false, 
+      clean, 
+      error: `2º dígito verificador inconsistente (calculado: '${d2Calculated}', informado: '${d2Given}')`,
+      expectedCheckDigits,
+      suggestedValidCPF,
+      details: { d1Calculated, d1Given, d2Calculated, d2Given }
+    };
   }
 
   return { valid: true, clean };

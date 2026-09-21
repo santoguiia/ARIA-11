@@ -126,6 +126,28 @@ npm run electron:build`;
             </div>
           </div>
 
+          {/* Diagnostics / Troubleshooting for Windows */}
+          <div className="bg-rose-950/30 border border-rose-800/50 rounded-lg p-3.5 space-y-2 text-[11px]">
+            <div className="flex items-center space-x-1.5 text-rose-300 font-bold">
+              <ShieldAlert className="w-4 h-4 text-rose-400" />
+              <span>Diagnóstico e Resolução de Problemas no Windows (x64)</span>
+            </div>
+            <ul className="space-y-1 text-slate-300 list-disc list-inside">
+              <li>
+                <strong className="text-rose-200">Tela Branca / Carregamento Falho:</strong> Certifique-se de executar <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">npm run build</code> antes de iniciar o Electron para gerar a pasta <code className="text-cyan-300 font-mono">dist/</code>.
+              </li>
+              <li>
+                <strong className="text-rose-200">Caminhos Locais (file://):</strong> O <code className="text-cyan-300 font-mono">vite.config.ts</code> está com <code className="text-emerald-300 font-mono">base: './'</code> para garantir caminhos relativos no Windows.
+              </li>
+              <li>
+                <strong className="text-rose-200">Console DevTools no Windows:</strong> Pressione <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-600 text-cyan-300 font-mono">F12</kbd> ou <kbd className="bg-slate-800 px-1.5 py-0.5 rounded border border-slate-600 text-cyan-300 font-mono">Ctrl+Shift+I</kbd> a qualquer momento no aplicativo para inspecionar erros em tempo real.
+              </li>
+              <li>
+                <strong className="text-rose-200">Testar Execução Sem Instalação Global:</strong> Utilize <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono">npx electron electron/main.cjs</code> após o build.
+              </li>
+            </ul>
+          </div>
+
         </div>
 
         {/* Footer */}

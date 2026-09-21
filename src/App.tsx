@@ -6,10 +6,32 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { MOCK_SCENARIOS } from './data/mockScenarios';
-import { DeathRecordData, OCRConfidenceMap, CaseScenario, AuditLogEntry } from './types';
+import { 
+  DeathRecordData, 
+  OCRConfidenceMap, 
+  CaseScenario, 
+  AuditLogEntry, 
+  FederatedBusStatus, 
+  CartorioCertificate, 
+  LocalFirstNodeStatus, 
+  EscreventeUser,
+  OCRDocumentState,
+  LicenseInfo,
+  LicenseTier,
+  LocalLLMStatus
+} from './types';
 import { evaluateQualityGate } from './engine/rules';
 import { computeHash } from './engine/validators';
+import { 
+  processUploadedOCRFile, 
+  createInitialOCRDocumentState
+} from './engine/ocrPipeline';
+import { INITIAL_FEDERATED_BUSES, CARTORIO_CERTIFICATE, INITIAL_LOCAL_FIRST_STATUS } from './data/federatedBuses';
+import { MOCK_ESCREVENTES, DEFAULT_ACTIVE_USER } from './data/mockUsers';
+import { getLicenseStatus, checkHeartbeat } from './engine/licenseEngine';
+import { getLLMStatus } from './engine/llmClient';
 
+import { LoginScreen } from './components/LoginScreen';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
 import { DesktopMenuBar } from './components/DesktopMenuBar';
 import { ComparativePanel } from './components/ComparativePanel';
@@ -19,6 +41,9 @@ import { OCRPreviewModal } from './components/OCRPreviewModal';
 import { CertificatePreviewModal } from './components/CertificatePreviewModal';
 import { ElectronPackagerModal } from './components/ElectronPackagerModal';
 import { AboutModal } from './components/AboutModal';
+import { FederatedMtlsModal } from './components/FederatedMtlsModal';
+import { LicenseManagerModal } from './components/LicenseManagerModal';
+import { UpgradeAlertModal } from './components/UpgradeAlertModal';
 
 export default function App() {
   // Current active scenario
@@ -30,8 +55,78 @@ export default function App() {
   const [ocrConfidence, setOcrConfidence] = useState<OCRConfidenceMap>(MOCK_SCENARIOS[0].ocrConfidence);
   const [federada, setFederada] = useState<DeathRecordData>(MOCK_SCENARIOS[0].dadosFederados);
 
+  // Local-First OCR Document State with Bounding Boxes & LGPD On-Device processing
+  const [ocrDocumentState, setOcrDocumentState] = useState<OCRDocumentState>(() => {
+    return createInitialOCRDocumentState(MOCK_SCENARIOS[0].dadosOCR).state;
+  });
+  const [focusedOCRField, setFocusedOCRField] = useState<keyof DeathRecordData | null>(null);
+
+  // Federated Buses & Local-First Node State
+  const [federatedBuses, setFederatedBuses] = useState<FederatedBusStatus[]>(INITIAL_FEDERATED_BUSES);
+  const [cartorioCert, setCartorioCert] = useState<CartorioCertificate>(CARTORIO_CERTIFICATE);
+  const [localNodeStatus, setLocalNodeStatus] = useState<LocalFirstNodeStatus>(INITIAL_LOCAL_FIRST_STATUS);
+  const [isTestingHandshake, setIsTestingHandshake] = useState(false);
+
   // Justifications keyed by ruleId
   const [justifications, setJustifications] = useState<Record<string, string>>({});
+
+  // Active Clerk / Escrevente and Authentication State
+  const [currentUser, setCurrentUser] = useState<EscreventeUser | null>(() => {
+    const saved = localStorage.getItem('aria_logged_user');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    return DEFAULT_ACTIVE_USER;
+  });
+
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    const saved = localStorage.getItem('aria_logged_in');
+    return saved !== null ? saved === 'true' : true;
+  });
+
+  // Dark Mode Theme State
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem('aria_theme_preference');
+    return saved !== null ? saved === 'dark' : true;
+  });
+
+  const handleToggleDarkMode = () => {
+    setIsDarkMode(prev => {
+      const next = !prev;
+      localStorage.setItem('aria_theme_preference', next ? 'dark' : 'light');
+      return next;
+    });
+  };
+
+  const handleLogin = (user: EscreventeUser) => {
+    setCurrentUser(user);
+    setIsLoggedIn(true);
+    localStorage.setItem('aria_logged_user', JSON.stringify(user));
+    localStorage.setItem('aria_logged_in', 'true');
+    appendAuditLog(
+      'OPERADOR_LOGIN',
+      `Sessão iniciada: ${user.nome} (${user.matricula}) autenticado via ${
+        user.loginMethod === 'CERTIFICADO_DIGITAL' ? 'Certificado Digital ICP-Brasil' : 'Matrícula e Senha'
+      }.`
+    );
+    showToast(`Bem-vindo, ${user.nome}! Sessão autenticada.`);
+  };
+
+  const handleLogout = () => {
+    if (currentUser) {
+      appendAuditLog(
+        'OPERADOR_LOGOUT',
+        `Estação de trabalho bloqueada / logout efetuado por ${currentUser.nome} (${currentUser.matricula}).`
+      );
+    }
+    setIsLoggedIn(false);
+    localStorage.setItem('aria_logged_in', 'false');
+    showToast('Estação de trabalho bloqueada. Faça login para continuar.');
+  };
 
   // Local Audit Logs (simulating SQLite persistent ledger with SHA-256 hash chaining)
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -42,6 +137,37 @@ export default function App() {
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
   const [isPackagerModalOpen, setIsPackagerModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
+  const [isMtlsModalOpen, setIsMtlsModalOpen] = useState(false);
+  const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
+  const [upgradeAlertTier, setUpgradeAlertTier] = useState<LicenseTier | null>(null);
+
+  // Licensing and Local LLM State
+  const [license, setLicense] = useState<LicenseInfo | null>(null);
+  const [llmStatus, setLlmStatus] = useState<LocalLLMStatus | null>(null);
+
+  // Initial License & LLM Engine Handshake
+  useEffect(() => {
+    getLicenseStatus().then(lic => {
+      setLicense(lic);
+    }).catch(err => console.warn('Falha ao obter licença:', err));
+
+    getLLMStatus().then(status => {
+      setLlmStatus(status);
+    }).catch(err => console.warn('Falha ao obter status LLM:', err));
+
+    // Periodic Heartbeat check every 5 minutes
+    const interval = setInterval(() => {
+      checkHeartbeat().then(() => {
+        getLicenseStatus().then(lic => setLicense(lic));
+      }).catch(err => console.warn('Heartbeat error:', err));
+
+      getLLMStatus().then(status => {
+        setLlmStatus(status);
+      }).catch(() => {});
+    }, 5 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Toast / notification
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -50,6 +176,23 @@ export default function App() {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
+
+  // Auto-heal legacy mock CPFs if present in state
+  useEffect(() => {
+    if (declaracao.cpf === '582.914.730-49') {
+      setDeclaracao(prev => ({ ...prev, cpf: '582.914.730-05' }));
+      setOcr(prev => prev.cpf === '582.914.730-49' ? { ...prev, cpf: '582.914.730-05' } : prev);
+      setFederada(prev => prev.cpf === '582.914.730-49' ? { ...prev, cpf: '582.914.730-05' } : prev);
+    } else if (declaracao.cpf === '249.882.318-72') {
+      setDeclaracao(prev => ({ ...prev, cpf: '249.882.318-28' }));
+      setOcr(prev => prev.cpf === '249.882.318-72' ? { ...prev, cpf: '249.882.318-28' } : prev);
+      setFederada(prev => prev.cpf === '249.882.318-72' ? { ...prev, cpf: '249.882.318-28' } : prev);
+    } else if (declaracao.cpf === '714.285.910-00') {
+      setDeclaracao(prev => ({ ...prev, cpf: '714.285.910-52' }));
+      setOcr(prev => prev.cpf === '714.285.910-00' ? { ...prev, cpf: '714.285.910-52' } : prev);
+      setFederada(prev => prev.cpf === '714.285.910-00' ? { ...prev, cpf: '714.285.910-52' } : prev);
+    }
+  }, []);
 
   // Evaluate Quality Gate rules
   const gateEvaluation = useMemo(() => {
@@ -73,12 +216,18 @@ export default function App() {
         pseudoHash = ((pseudoHash + seed.charCodeAt(i).toString(16)) + 'abcdef0123456789').slice(0, 64);
       }
 
+      const operadorLabel = currentUser 
+        ? `${currentUser.nome} (${currentUser.cargoLabel})`
+        : 'Guilherme Santos (Escrevente Autorizado)';
+      const matriculaLabel = currentUser?.matricula || 'ESC-8419';
+      const cartorioLabel = currentUser?.cartorio || '1º Ofício de RCPN Central';
+
       const newEntry: AuditLogEntry = {
         id: `LOG-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         timestamp,
-        operador: 'Guilherme Santos (Escrevente)',
-        matricula: 'ESC-8419',
-        cartorio: '1º Ofício de RCPN Central',
+        operador: operadorLabel,
+        matricula: matriculaLabel,
+        cartorio: cartorioLabel,
         action,
         resumo,
         sha256Hash: pseudoHash,
@@ -128,8 +277,66 @@ export default function App() {
     setOcrConfidence({ ...scen.ocrConfidence });
     setFederada({ ...scen.dadosFederados });
     setJustifications({});
+    const initDoc = createInitialOCRDocumentState(scen.dadosOCR);
+    setOcrDocumentState(initDoc.state);
     appendAuditLog('SCENARIO_LOADED', `Carregado cenário de teste: ${scen.title}`);
     showToast(`Cenário carregado: ${scen.title}`);
+  };
+
+  // Handler: Upload and process physical document file (.pdf, .png, .jpeg) with Local Tesseract OCR
+  const handleUploadOCRFile = async (file: File) => {
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+    setOcrDocumentState(prev => ({
+      ...prev,
+      fileName: file.name,
+      fileType: isPdf ? 'PDF' : 'IMAGE',
+      isProcessing: true,
+      processingProgress: 15,
+      processingStep: `Carregando ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`
+    }));
+
+    showToast(`Iniciando OCR local de '${file.name}'...`);
+
+    try {
+      const result = await processUploadedOCRFile(
+        file,
+        ocr,
+        (step, percent) => {
+          setOcrDocumentState(prev => ({
+            ...prev,
+            processingProgress: percent,
+            processingStep: step
+          }));
+        }
+      );
+
+      setOcrDocumentState(result.state);
+      setOcr(result.parsedRecord);
+      setOcrConfidence(result.confidenceMap);
+
+      await appendAuditLog(
+        'EVALUATION',
+        `Arquivo físico '${file.name}' ingerido e processado via pipeline Tesseract OCR On-Device (Privacidade total LGPD). ${Object.keys(result.state.fields).length} campos extraídos com scores de confiança.`
+      );
+
+      showToast(`Arquivo '${file.name}' processado com sucesso pelo OCR local!`);
+    } catch (err: any) {
+      console.error('Erro no processamento OCR:', err);
+      setOcrDocumentState(prev => ({
+        ...prev,
+        isProcessing: false,
+        processingProgress: 0,
+        processingStep: 'Erro no processamento',
+        error: err?.message || 'Falha ao processar arquivo'
+      }));
+      showToast(`Erro ao processar '${file.name}'.`);
+    }
+  };
+
+  // Handler: Open OCR Preview focused on a specific field
+  const handleOpenOCRModal = (field?: keyof DeathRecordData) => {
+    setFocusedOCRField(field || 'nomeFalecido');
+    setIsOCRModalOpen(true);
   };
 
   // Handler: Reset to clean slate
@@ -195,6 +402,62 @@ export default function App() {
     setIsCertificateModalOpen(true);
   };
 
+  // Handler: Toggle Offline / Contingency Mode (Local-First preservation)
+  const handleToggleContingency = () => {
+    setLocalNodeStatus(prev => {
+      const nextMode = !prev.contingencyMode;
+      appendAuditLog(
+        'EVALUATION',
+        nextMode 
+          ? 'Modo Contingência Offline ativado: consultas aos barramentos federados suspensas. Motor determinístico operando 100% na ponta.'
+          : 'Modo Contingência Offline desativado: reconectando barramentos federados via mTLS ICP-Brasil.'
+      );
+      showToast(nextMode ? 'Modo de Contingência Offline ATIVADO.' : 'Modo Contingência DESATIVADO. Conexões mTLS restabelecidas.');
+      return {
+        ...prev,
+        contingencyMode: nextMode
+      };
+    });
+  };
+
+  // Handler: Test mTLS Handshake with external federated buses
+  const handleTestHandshake = async (busId?: string) => {
+    setIsTestingHandshake(true);
+    try {
+      if (window.electronAPI?.testMtlsHandshake) {
+        const res = await window.electronAPI.testMtlsHandshake(busId);
+        showToast(`mTLS Handshake OK: Latência ${res.latencyMs}ms (${res.tlsVersion} / ${res.cipherSuite})`);
+      } else {
+        // Web / browser simulation
+        await new Promise(r => setTimeout(r, 600));
+        showToast(`Handshake mTLS validado com sucesso (TLS 1.3 / ECDHE-RSA-AES256-GCM-SHA384).`);
+      }
+      
+      const nowStr = new Date().toLocaleTimeString('pt-BR');
+      setFederatedBuses(prev => prev.map(b => {
+        if (!busId || b.id === busId) {
+          return {
+            ...b,
+            status: 'CONNECTED',
+            lastSync: `Hoje às ${nowStr}`,
+            latencyMs: Math.floor(Math.random() * 25) + 20
+          };
+        }
+        return b;
+      }));
+      setCartorioCert(prev => ({
+        ...prev,
+        lastHandshake: `Hoje às ${nowStr} (mTLS OK)`
+      }));
+      appendAuditLog('EVALUATION', `Handshake mTLS ICP-Brasil realizado com sucesso para ${busId || 'todos os barramentos federados'}.`);
+    } catch (err) {
+      console.error(err);
+      showToast('Falha no teste de handshake mTLS.');
+    } finally {
+      setIsTestingHandshake(false);
+    }
+  };
+
   // Export Audit Trail as JSON
   const handleExportAuditJSON = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(auditLogs, null, 2));
@@ -216,8 +479,8 @@ RELATÓRIO TÉCNICO DE QUALITY GATE & CONFORMIDADE DE ÓBITO - ARIA ENGINE
 PROJETO ACADÊMICO REF-11 / INE5448 (LEGALTECH / UFSC)
 ================================================================================
 Data/Hora da Emissão: ${new Date().toLocaleString('pt-BR')}
-Ofício de Registro: 1º Ofício de RCPN Central
-Escrevente Responsável: Guilherme Santos (Matrícula: ESC-8419)
+Ofício de Registro: ${currentUser?.cartorio || '1º Ofício de RCPN Central'}
+Escrevente Responsável: ${currentUser ? `${currentUser.nome} - ${currentUser.cargoLabel} (Matrícula: ${currentUser.matricula})` : 'Guilherme Santos - Escrevente Autorizado (Matrícula: ESC-8419)'}
 Status do Quality Gate: ${gateEvaluation.canLavrar ? 'APROVADO / CONFORME' : 'RETIDO / PENDENTE'}
 --------------------------------------------------------------------------------
 1. QUALIFICAÇÃO DO ATO E DO FALECIDO
@@ -267,16 +530,38 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
     showToast('Laudo técnico (.txt) exportado com sucesso.');
   };
 
+  // If not logged in, show the full clerk login screen
+  if (!isLoggedIn) {
+    return (
+      <div className={isDarkMode ? 'dark' : 'light'}>
+        <LoginScreen
+          onLogin={handleLogin}
+          isDarkMode={isDarkMode}
+          onToggleDarkMode={handleToggleDarkMode}
+        />
+        {toastMessage && (
+          <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-50 bg-slate-800 text-white border border-slate-700 px-4 py-2 rounded-lg shadow-2xl text-xs flex items-center space-x-2 animate-in fade-in slide-in-from-bottom-2">
+            <span className="w-2 h-2 rounded-full bg-cyan-400"></span>
+            <span>{toastMessage}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
+    <div className={`flex flex-col h-screen w-screen font-sans overflow-hidden select-none transition-colors duration-200 ${
+      isDarkMode ? 'dark bg-slate-950 text-slate-100' : 'light bg-slate-100 text-slate-900'
+    }`}>
       
       {/* 1. Desktop Window Titlebar (Windows 10/11) */}
       <DesktopTitleBar
         currentScenarioTitle={currentScenario.title}
-        hasImpediments={gateEvaluation.hasImpediments}
-        hasPendingAlerts={gateEvaluation.hasPendingAlerts}
+        currentUser={currentUser}
+        onLogout={handleLogout}
         onOpenAudit={() => setIsAuditModalOpen(true)}
-        onOpenPackager={() => setIsPackagerModalOpen(true)}
+        license={license}
+        onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
       />
 
       {/* 2. Desktop Application Menu Bar */}
@@ -294,6 +579,13 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
         onTriggerReevaluate={() => {
           showToast('Regras reavaliadas pelo motor determinístico.');
         }}
+        onOpenMtlsModal={() => setIsMtlsModalOpen(true)}
+        onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={handleToggleDarkMode}
+        onLogout={handleLogout}
+        hasImpediments={gateEvaluation.hasImpediments}
+        hasPendingAlerts={gateEvaluation.hasPendingAlerts}
       />
 
       {/* 3. Main Working Area: 3-Column Comparative Panel + Quality Gate Drawer */}
@@ -304,10 +596,13 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           ocr={ocr}
           ocrConfidence={ocrConfidence}
           federada={federada}
+          ocrDocumentState={ocrDocumentState}
+          onUploadOCRFile={handleUploadOCRFile}
           onUpdateDeclaracaoField={handleUpdateDeclaracaoField}
           onCopyFromFederada={handleCopyFromFederada}
           onCopyFromOCR={handleCopyFromOCR}
-          onOpenOCRModal={() => setIsOCRModalOpen(true)}
+          onOpenOCRModal={handleOpenOCRModal}
+          onOpenMtlsModal={() => setIsMtlsModalOpen(true)}
         />
 
         {/* Right Drawer: Quality Gate Rules, Justifications & Lavratura */}
@@ -320,6 +615,15 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           onUpdateJustification={handleUpdateJustification}
           onLavrarAto={handleLavrarAto}
           onOpenAuditModal={() => setIsAuditModalOpen(true)}
+          onApplySuggestedFix={(field, value) => {
+            handleUpdateDeclaracaoField(field, value);
+            showToast(`Campo ${String(field).toUpperCase()} atualizado para: ${value}`);
+          }}
+          license={license}
+          onTriggerUpgradeAlert={(tier) => setUpgradeAlertTier(tier)}
+          declaracao={declaracao}
+          ocr={ocr}
+          federada={federada}
         />
       </div>
 
@@ -331,13 +635,34 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
             <span className="text-slate-300 font-medium">Motor OPA/Rego: Ativo</span>
           </div>
           <span className="text-slate-600">|</span>
-          <span>Cenário: <strong className="text-slate-200">{currentScenario.title}</strong></span>
+          <div className="flex items-center space-x-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${llmStatus?.isLoaded ? 'bg-amber-400 animate-pulse' : 'bg-indigo-400'}`}></span>
+            <span className="font-mono text-[10px] text-slate-300">
+              Qwen2.5-1.5B: {llmStatus?.isLoaded ? 'Memória Ativa' : 'Standby (Lazy)'}
+            </span>
+          </div>
+          <span className="text-slate-600">|</span>
+          <button
+            onClick={() => setIsLicenseModalOpen(true)}
+            className="flex items-center space-x-1 text-amber-300 hover:text-amber-200 transition-colors"
+            title="Clique para gerenciar licença SaaS Local-First"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            <span>Licença: <strong className="font-semibold">{license?.license_tier || 'PRO_AI'}</strong></span>
+          </button>
           <span className="text-slate-600">|</span>
           <span>D.O. em Análise: <strong className="font-mono text-cyan-300">{declaracao.numeroDO}</strong></span>
         </div>
 
         <div className="flex items-center space-x-3 text-slate-400">
-          <span>Base Central: <strong className="text-emerald-400">CRC Nacional Conectada</strong></span>
+          <button
+            onClick={() => setIsMtlsModalOpen(true)}
+            className="flex items-center space-x-1 hover:text-emerald-300 transition-colors"
+            title="Clique para inspecionar túnel mTLS ICP-Brasil e barramentos federados"
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>mTLS ICP-Brasil: <strong className="text-emerald-400">CRC/ONR/SIRC Conectados</strong></span>
+          </button>
           <span className="text-slate-600">|</span>
           <span>Trilha SHA-256: <strong className="font-mono text-slate-300">{auditLogs.length} blocos</strong></span>
           <span className="text-slate-600">|</span>
@@ -370,14 +695,21 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
       <OCRPreviewModal
         isOpen={isOCRModalOpen}
         onClose={() => setIsOCRModalOpen(false)}
+        documentState={ocrDocumentState}
         ocrData={ocr}
         ocrConfidence={ocrConfidence}
+        focusedField={focusedOCRField}
+        onSelectField={(f) => setFocusedOCRField(f)}
       />
 
       <CertificatePreviewModal
         isOpen={isCertificateModalOpen}
         onClose={() => setIsCertificateModalOpen(false)}
         record={declaracao}
+        currentUser={currentUser}
+        license={license}
+        justifications={justifications}
+        onTriggerUpgradeAlert={(tier) => setUpgradeAlertTier(tier)}
       />
 
       <ElectronPackagerModal
@@ -388,6 +720,37 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
+      />
+
+      <FederatedMtlsModal
+        isOpen={isMtlsModalOpen}
+        onClose={() => setIsMtlsModalOpen(false)}
+        buses={federatedBuses}
+        certificate={cartorioCert}
+        nodeStatus={localNodeStatus}
+        onToggleContingency={handleToggleContingency}
+        onTestHandshake={handleTestHandshake}
+        isTestingHandshake={isTestingHandshake}
+      />
+
+      <LicenseManagerModal
+        isOpen={isLicenseModalOpen}
+        onClose={() => setIsLicenseModalOpen(false)}
+        currentLicense={license}
+        onLicenseUpdated={(newLic) => {
+          setLicense(newLic);
+          showToast(`Licença ${newLic.license_tier} ativada com sucesso!`);
+        }}
+      />
+
+      <UpgradeAlertModal
+        isOpen={!!upgradeAlertTier}
+        onClose={() => setUpgradeAlertTier(null)}
+        requiredTier={upgradeAlertTier || 'PRO_AI'}
+        onOpenLicenseManager={() => {
+          setUpgradeAlertTier(null);
+          setIsLicenseModalOpen(true);
+        }}
       />
 
     </div>

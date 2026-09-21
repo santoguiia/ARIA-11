@@ -10,6 +10,17 @@
     "electron/**/*",
     "package.json"
   ],
+  "extraResources": [
+    {
+      "from": "resources/models",
+      "to": "models",
+      "filter": ["Qwen2.5-1.5B-Instruct-Q4_K_M.gguf", "*.gguf", "*.json"]
+    }
+  ],
+  "asar": true,
+  "asarUnpack": [
+    "**/node_modules/node-llama-cpp/**/*"
+  ],
   "win": {
     "target": [
       {

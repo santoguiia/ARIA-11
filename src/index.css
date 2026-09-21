@@ -1,1 +1,205 @@
 @import "tailwindcss";
+
+/* 
+ * ARIA Desktop - Suporte a Modo Claro e Modo Escuro
+ * Padrão Cartorial e Judiciário de Alto Contraste (WCAG AA)
+ */
+
+.light {
+  color-scheme: light;
+}
+
+/* Fundo da Janela e Painéis Principais */
+.light .bg-slate-950 {
+  background-color: #f1f5f9 !important; /* Slate 100 */
+}
+
+.light .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+.light .bg-slate-900\/95,
+.light .bg-slate-900\/90,
+.light .bg-slate-900\/80,
+.light .bg-slate-900\/60,
+.light .bg-slate-900\/50,
+.light .bg-slate-900\/40,
+.light .bg-slate-900\/70 {
+  background-color: #ffffff !important;
+}
+
+.light .bg-slate-800 {
+  background-color: #f8fafc !important;
+}
+
+.light .bg-slate-800\/95,
+.light .bg-slate-800\/90,
+.light .bg-slate-800\/70,
+.light .bg-slate-800\/60,
+.light .bg-slate-800\/50,
+.light .bg-slate-800\/40 {
+  background-color: #f1f5f9 !important;
+}
+
+.light .bg-slate-700,
+.light .bg-slate-700\/80,
+.light .bg-slate-700\/50 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Bordas em Modo Claro */
+.light .border-slate-800,
+.light .border-slate-800\/80,
+.light .border-slate-800\/60 {
+  border-color: #e2e8f0 !important;
+}
+
+.light .border-slate-700,
+.light .border-slate-700\/80,
+.light .border-slate-700\/60,
+.light .border-slate-700\/50 {
+  border-color: #cbd5e1 !important;
+}
+
+.light .border-slate-600 {
+  border-color: #94a3b8 !important;
+}
+
+.light .divide-slate-800,
+.light .divide-slate-800\/80 {
+  border-color: #f1f5f9 !important;
+}
+
+/* Tipografia e Textos */
+.light .text-slate-100 {
+  color: #0f172a !important; /* Slate 900 */
+}
+
+.light .text-slate-200 {
+  color: #1e293b !important; /* Slate 800 */
+}
+
+.light .text-slate-300 {
+  color: #334155 !important; /* Slate 700 */
+}
+
+.light .text-slate-400 {
+  color: #64748b !important; /* Slate 500 */
+}
+
+.light .text-slate-500 {
+  color: #64748b !important;
+}
+
+.light .text-slate-600 {
+  color: #94a3b8 !important;
+}
+
+.light .text-white {
+  color: #0f172a !important;
+}
+
+/* Entradas de Formulário (Inputs, Selects, Textareas) */
+.light input[type="text"],
+.light input[type="password"],
+.light select,
+.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.light input[type="text"]:focus,
+.light input[type="password"]:focus,
+.light select:focus,
+.light textarea:focus {
+  border-color: #4f46e5 !important;
+  background-color: #ffffff !important;
+}
+
+/* Hover e Estados Ativos */
+.light .hover\:bg-slate-700:hover,
+.light .hover\:bg-slate-600:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.light .hover\:bg-slate-800:hover,
+.light .hover\:bg-slate-800\/40:hover {
+  background-color: #f1f5f9 !important;
+}
+
+/* Adaptação de Destaques de Divergência em Modo Claro */
+.light .bg-rose-950,
+.light .bg-rose-950\/80,
+.light .bg-rose-950\/50,
+.light .bg-rose-950\/30,
+.light .bg-rose-950\/15 {
+  background-color: #ffe4e6 !important; /* rose-100 */
+}
+
+.light .text-rose-300,
+.light .text-rose-200,
+.light .text-rose-100 {
+  color: #be123c !important; /* rose-700 */
+}
+
+.light .border-rose-700,
+.light .border-rose-600,
+.light .border-rose-500 {
+  border-color: #f43f5e !important; /* rose-500 */
+}
+
+/* Adaptação de Destaques Verdes (Convergência / Sucesso) */
+.light .bg-emerald-950,
+.light .bg-emerald-950\/80,
+.light .bg-emerald-950\/60,
+.light .bg-emerald-950\/40 {
+  background-color: #d1fae5 !important; /* emerald-100 */
+}
+
+.light .text-emerald-300,
+.light .text-emerald-400 {
+  color: #047857 !important; /* emerald-700 */
+}
+
+.light .border-emerald-700,
+.light .border-emerald-800 {
+  border-color: #10b981 !important;
+}
+
+/* Adaptação de Destaques Azuis e Índigo (Fontes A e C) */
+.light .bg-indigo-950,
+.light .bg-indigo-950\/20,
+.light .bg-indigo-900\/60,
+.light .bg-indigo-900\/80 {
+  background-color: #e0e7ff !important; /* indigo-100 */
+}
+
+.light .text-indigo-300,
+.light .text-indigo-200 {
+  color: #3730a3 !important; /* indigo-800 */
+}
+
+.light .bg-cyan-950,
+.light .bg-cyan-950\/20,
+.light .bg-cyan-900\/50 {
+  background-color: #cffafe !important; /* cyan-100 */
+}
+
+.light .text-cyan-300,
+.light .text-cyan-400 {
+  color: #0e7490 !important; /* cyan-700 */
+}
+
+/* Adaptação de Destaques Ambar / Alertas */
+.light .bg-amber-950,
+.light .bg-amber-950\/60,
+.light .bg-amber-900\/40 {
+  background-color: #fef3c7 !important; /* amber-100 */
+}
+
+.light .text-amber-300,
+.light .text-amber-400 {
+  color: #b45309 !important; /* amber-700 */
+}
+

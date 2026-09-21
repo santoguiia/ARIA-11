@@ -46,7 +46,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosDeclaracao: {
       numeroDO: '31289410-4',
       nomeFalecido: 'ANTONIO CARLOS DE MENEZES',
-      cpf: '249.882.318-72',
+      cpf: '249.882.318-28',
       rg: '14.892.110-2',
       rgOrgaoEmissor: 'SSP/SP',
       dataNascimento: '1965-08-14',
@@ -81,7 +81,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosOCR: {
       numeroDO: '31289410-4',
       nomeFalecido: 'ANTONIO CARLOS DE MENEZES',
-      cpf: '249.882.318-72',
+      cpf: '249.882.318-28',
       rg: '14.892.110-2',
       rgOrgaoEmissor: 'SSP/SP',
       dataNascimento: '1965-08-14',
@@ -122,7 +122,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosFederados: {
       numeroDO: '31289410-4',
       nomeFalecido: 'ANTONIO CARLOS DE MENEZES',
-      cpf: '249.882.318-72',
+      cpf: '249.882.318-28',
       rg: '14.892.110-2',
       rgOrgaoEmissor: 'SSP/SP',
       dataNascimento: '1965-08-14',
@@ -164,7 +164,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosDeclaracao: {
       numeroDO: '40918231-1',
       nomeFalecido: 'MARIA APARECIDA DOS SANTOS OLIVEIRA',
-      cpf: '714.285.910-00',
+      cpf: '714.285.910-52',
       rg: '22.391.002-X',
       rgOrgaoEmissor: 'DETRAN/RJ',
       dataNascimento: '1952-04-19',
@@ -198,7 +198,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosOCR: {
       numeroDO: '40918231-1',
       nomeFalecido: 'MARIA APARECIDA SANTOS OLIVEIRA',
-      cpf: '714.285.910-00',
+      cpf: '714.285.910-52',
       rg: '22.391.002-X',
       rgOrgaoEmissor: 'DETRAN/RJ',
       dataNascimento: '1952-04-19',
@@ -236,7 +236,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosFederados: {
       numeroDO: '40918231-1',
       nomeFalecido: 'MARIA APARECIDA DOS SANTOS OLIVEIRA',
-      cpf: '714.285.910-00',
+      cpf: '714.285.910-52',
       rg: '22.391.002-X',
       rgOrgaoEmissor: 'DETRAN/RJ',
       dataNascimento: '1952-04-19',
@@ -343,7 +343,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosFederados: {
       numeroDO: '51908214-8',
       nomeFalecido: 'VALDIR RODRIGUES PEREIRA',
-      cpf: '852.147.963-20', // CPF legítimo na Base da Receita Federal
+      cpf: '852.147.963-82', // CPF legítimo na Base da Receita Federal
       rg: '31.442.981-5',
       rgOrgaoEmissor: 'SSP/MG',
       dataNascimento: '1978-11-03',
@@ -385,7 +385,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosDeclaracao: {
       numeroDO: '60124890-3',
       nomeFalecido: 'FRANCISCO EDUARDO DE SOUZA ALMEIDA',
-      cpf: '582.914.730-49',
+      cpf: '582.914.730-05',
       rg: '19.420.551-3',
       rgOrgaoEmissor: 'SSP/SC',
       dataNascimento: '1947-12-05',
@@ -420,7 +420,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosOCR: {
       numeroDO: '60124890-3',
       nomeFalecido: 'FRANCISCO EDUARDO DE SOUZA ALMEIDA',
-      cpf: '582.914.730-49',
+      cpf: '582.914.730-05',
       rg: '19.420.551-3',
       rgOrgaoEmissor: 'SSP/SC',
       dataNascimento: '1947-12-05',
@@ -464,7 +464,7 @@ export const MOCK_SCENARIOS: CaseScenario[] = [
     dadosFederados: {
       numeroDO: '60124890-3',
       nomeFalecido: 'FRANCISCO EDUARDO DE SOUZA ALMEIDA',
-      cpf: '582.914.730-49',
+      cpf: '582.914.730-05',
       rg: '19.420.551-3',
       rgOrgaoEmissor: 'SSP/SC',
       dataNascimento: '1947-12-05',

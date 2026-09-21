@@ -12,7 +12,12 @@ import {
   CheckCircle2, 
   AlertTriangle, 
   XCircle,
-  FileCheck
+  FileCheck,
+  Lock,
+  ShieldCheck,
+  Sun,
+  Moon,
+  LogOut
 } from 'lucide-react';
 import { MOCK_SCENARIOS } from '../data/mockScenarios';
 import { CaseScenario } from '../types';
@@ -29,6 +34,13 @@ interface DesktopMenuBarProps {
   onExportReportTXT: () => void;
   onResetToDefaults: () => void;
   onTriggerReevaluate: () => void;
+  onOpenMtlsModal?: () => void;
+  onOpenLicenseModal?: () => void;
+  isDarkMode?: boolean;
+  onToggleDarkMode?: () => void;
+  onLogout?: () => void;
+  hasImpediments?: boolean;
+  hasPendingAlerts?: boolean;
 }
 
 export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
@@ -42,7 +54,14 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
   onExportAuditJSON,
   onExportReportTXT,
   onResetToDefaults,
-  onTriggerReevaluate
+  onTriggerReevaluate,
+  onOpenMtlsModal,
+  onOpenLicenseModal,
+  isDarkMode = true,
+  onToggleDarkMode,
+  onLogout,
+  hasImpediments = false,
+  hasPendingAlerts = false
 }) => {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
 
@@ -120,46 +139,21 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
                 <FileCheck className="w-3.5 h-3.5 text-amber-400" />
                 <span>Visualizar Minuta da Certidão</span>
               </button>
-            </div>
-          )}
-        </div>
-
-        {/* Menu: Casos PoC (REF-11 / INE5448) */}
-        <div className="relative">
-          <button
-            onClick={() => toggleMenu('casos')}
-            className={`px-2.5 py-1 rounded hover:bg-slate-700 font-medium flex items-center space-x-1 ${
-              openMenu === 'casos' ? 'bg-slate-700 text-white' : 'text-slate-300'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5 text-cyan-400 mr-1" />
-            <span>Casos de Teste PoC</span>
-          </button>
-          {openMenu === 'casos' && (
-            <div className="absolute left-0 mt-1 w-80 bg-slate-800 border border-slate-700 rounded-md shadow-2xl py-1 z-50 text-slate-200">
-              <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                Cenários do Projeto Acadêmico (INE5448)
-              </div>
-              {MOCK_SCENARIOS.map((scen) => (
-                <button
-                  key={scen.id}
-                  onClick={() => {
-                    onSelectScenario(scen);
-                    setOpenMenu(null);
-                  }}
-                  className={`w-full text-left px-3 py-2 hover:bg-slate-700 flex items-start space-x-2.5 transition-colors ${
-                    currentScenario.id === scen.id ? 'bg-slate-700/80 border-l-2 border-cyan-400' : ''
-                  }`}
-                >
-                  {scen.tag === 'CRITICO' && <XCircle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />}
-                  {scen.tag === 'ALERTA' && <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />}
-                  {scen.tag === 'CONFORME' && <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 shrink-0" />}
-                  <div>
-                    <div className="font-semibold text-xs text-white">{scen.title}</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">{scen.shortDesc}</div>
-                  </div>
-                </button>
-              ))}
+              {onLogout && (
+                <>
+                  <div className="border-t border-slate-700 my-1"></div>
+                  <button
+                    onClick={() => {
+                      onLogout();
+                      setOpenMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs text-rose-300"
+                  >
+                    <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                    <span>Trocar Escrevente / Bloquear Estação</span>
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -176,6 +170,27 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
           </button>
           {openMenu === 'qg' && (
             <div className="absolute left-0 mt-1 w-72 bg-slate-800 border border-slate-700 rounded-md shadow-2xl py-1 z-50 text-slate-200">
+              <div className="px-3 py-2 border-b border-slate-700 bg-slate-900/40">
+                <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold mb-1">
+                  Status Atual do Gate
+                </span>
+                {hasImpediments ? (
+                  <div className="flex items-center space-x-2 text-rose-300 font-bold text-xs">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse"></span>
+                    <span>BLOQUEADO (Impedimentos Legais)</span>
+                  </div>
+                ) : hasPendingAlerts ? (
+                  <div className="flex items-center space-x-2 text-amber-300 font-bold text-xs">
+                    <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                    <span>JUSTIFICATIVA PENDENTE</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2 text-emerald-300 font-bold text-xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>CONFORME (Apto para Lavratura)</span>
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => {
                   onTriggerReevaluate();
@@ -200,7 +215,7 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
           )}
         </div>
 
-        {/* Menu: Ferramentas */}
+        {/* Menu: Ferramentas (com opção de Modo Claro/Escuro) */}
         <div className="relative">
           <button
             onClick={() => toggleMenu('ferramentas')}
@@ -212,6 +227,36 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
           </button>
           {openMenu === 'ferramentas' && (
             <div className="absolute left-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-md shadow-2xl py-1 z-50 text-slate-200">
+              {/* Opção de Modo Claro / Modo Escuro */}
+              {onToggleDarkMode && (
+                <button
+                  id="menu-ferramentas-toggle-theme"
+                  onClick={() => {
+                    onToggleDarkMode();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center justify-between text-xs"
+                >
+                  <div className="flex items-center space-x-2">
+                    {isDarkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-indigo-400" />}
+                    <span>{isDarkMode ? 'Alternar para Modo Claro' : 'Alternar para Modo Escuro'}</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">
+                    {isDarkMode ? 'Escuro' : 'Claro'}
+                  </span>
+                </button>
+              )}
+              <div className="border-t border-slate-700 my-1"></div>
+              <button
+                onClick={() => {
+                  onOpenCertificateModal();
+                  setOpenMenu(null);
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs"
+              >
+                <FileCheck className="w-3.5 h-3.5 text-amber-400" />
+                <span>Minuta Oficial do Assento (CNJ 149)</span>
+              </button>
               <button
                 onClick={() => {
                   onOpenOCRModal();
@@ -220,7 +265,7 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
                 className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs"
               >
                 <ScanLine className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Visualizador de OCR (DO Física)</span>
+                <span>Visualizador de OCR (DO Digitalizada)</span>
               </button>
               <button
                 onClick={() => {
@@ -232,6 +277,30 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
                 <History className="w-3.5 h-3.5 text-cyan-400" />
                 <span>Logs de Auditoria Criptográfica SHA-256</span>
               </button>
+              {onOpenMtlsModal && (
+                <button
+                  onClick={() => {
+                    onOpenMtlsModal();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs text-emerald-300"
+                >
+                  <Lock className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Barramentos Federados via mTLS (CRC/ONR/SIRC)</span>
+                </button>
+              )}
+              {onOpenLicenseModal && (
+                <button
+                  onClick={() => {
+                    onOpenLicenseModal();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs text-amber-300"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Licenciamento SaaS Local-First & HWID</span>
+                </button>
+              )}
               <div className="border-t border-slate-700 my-1"></div>
               <button
                 onClick={() => {
@@ -247,6 +316,16 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
           )}
         </div>
 
+        {/* Menu: Licença */}
+        {onOpenLicenseModal && (
+          <button
+            onClick={onOpenLicenseModal}
+            className="px-2.5 py-1 rounded hover:bg-slate-700 font-medium text-slate-300 hover:text-white"
+          >
+            Licença
+          </button>
+        )}
+
         {/* Menu: Ajuda */}
         <div className="relative">
           <button
@@ -259,6 +338,18 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
           </button>
           {openMenu === 'ajuda' && (
             <div className="absolute left-0 mt-1 w-64 bg-slate-800 border border-slate-700 rounded-md shadow-2xl py-1 z-50 text-slate-200">
+              {onOpenLicenseModal && (
+                <button
+                  onClick={() => {
+                    onOpenLicenseModal();
+                    setOpenMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs"
+                >
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Informações da Licença & Machine HWID</span>
+                </button>
+              )}
               <button
                 onClick={() => {
                   onOpenAboutModal();
@@ -267,41 +358,11 @@ export const DesktopMenuBar: React.FC<DesktopMenuBarProps> = ({
                 className="w-full text-left px-3 py-1.5 hover:bg-slate-700 flex items-center space-x-2 text-xs"
               >
                 <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
-                <span>Sobre o Projeto REF-11 / INE5448</span>
+                <span>Sobre o Sistema ARIA Desktop</span>
               </button>
             </div>
           )}
         </div>
-      </div>
-
-      {/* Quick Actions Shortcuts Toolbar on right */}
-      <div className="flex items-center space-x-2">
-        <button
-          onClick={onOpenOCRModal}
-          className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-slate-700/80 hover:bg-slate-600 rounded text-slate-300 hover:text-white transition-colors"
-          title="Ver Guia Física Digitalizada (OCR)"
-        >
-          <ScanLine className="w-3 h-3 text-cyan-400" />
-          <span className="hidden sm:inline">Ver DO Física</span>
-        </button>
-
-        <button
-          onClick={onOpenAudit}
-          className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-slate-700/80 hover:bg-slate-600 rounded text-slate-300 hover:text-white transition-colors"
-          title="Abrir Trilha de Auditoria"
-        >
-          <History className="w-3 h-3 text-amber-400" />
-          <span className="hidden sm:inline">Auditoria</span>
-        </button>
-
-        <button
-          onClick={onOpenCertificateModal}
-          className="inline-flex items-center space-x-1.5 px-2 py-0.5 bg-indigo-900/80 hover:bg-indigo-800 border border-indigo-700 rounded text-indigo-200 hover:text-white transition-colors"
-          title="Minuta do Assento de Óbito"
-        >
-          <FileCheck className="w-3 h-3 text-indigo-300" />
-          <span className="hidden sm:inline">Minuta do Assento</span>
-        </button>
       </div>
     </nav>
   );
