@@ -17,7 +17,8 @@ import {
   Sparkles,
   ExternalLink,
   Cpu,
-  RefreshCw
+  RefreshCw,
+  Scale
 } from 'lucide-react';
 import { RuleEvaluationResult, RuleSeverity, DeathRecordData, LicenseInfo, LicenseTier } from '../types';
 import { DiffHighlight } from '../engine/diffHighlight';
@@ -32,6 +33,7 @@ interface QualityGateDrawerProps {
   onUpdateJustification: (ruleId: string, text: string) => void;
   onLavrarAto: () => void;
   onOpenAuditModal: () => void;
+  onOpenCNJReportModal?: () => void;
   onApplySuggestedFix?: (field: keyof DeathRecordData, value: string) => void;
   license?: LicenseInfo | null;
   onTriggerUpgradeAlert?: (requiredTier: LicenseTier) => void;
@@ -49,6 +51,7 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
   onUpdateJustification,
   onLavrarAto,
   onOpenAuditModal,
+  onOpenCNJReportModal,
   onApplySuggestedFix,
   license,
   onTriggerUpgradeAlert,
@@ -425,6 +428,17 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
 
       {/* Bottom Action Footer: Lavratura Button & Audit Link */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/90 space-y-2">
+        {onOpenCNJReportModal && (
+          <button
+            onClick={onOpenCNJReportModal}
+            className="w-full py-2 px-3 rounded-md font-semibold text-xs flex items-center justify-center space-x-2 bg-slate-900 hover:bg-slate-800 text-cyan-300 hover:text-cyan-200 border border-cyan-800/60 transition-colors shadow-sm cursor-pointer"
+            title="Emitir Laudo de Conformidade Oficial e Exportar PDF Certificado pelo CNJ (Provimento nº 149/2023)"
+          >
+            <Scale className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Emitir Laudo CNJ Certificado (PDF)</span>
+          </button>
+        )}
+
         <button
           disabled={!canLavrar}
           onClick={onLavrarAto}

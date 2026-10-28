@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { LocalLLMEngine } = require('./llmEngine.cjs');
@@ -14,6 +14,158 @@ let mainWindow;
 let llmEngine;
 let licenseManager;
 
+/**
+ * Constrói o Menu de Aplicação Nativo do Windows.
+ * Com 'autoHideMenuBar: true', o Windows mantém o menu oculto por padrão
+ * e exibe a barra nativa do sistema operacional ao pressionar a tecla ALT.
+ */
+function buildApplicationMenu(win) {
+  const isMac = process.platform === 'darwin';
+
+  const template = [
+    {
+      label: '&Arquivo',
+      submenu: [
+        {
+          label: 'Novo Assento / Reiniciar Caso',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => win && win.webContents.send('menu-action', 'reset-scenario')
+        },
+        { type: 'separator' },
+        {
+          label: 'Cenários de Teste (PoC)',
+          submenu: [
+            {
+              label: 'Caso 1: Óbito Consistente e Fluido (Carlos Eduardo)',
+              click: () => win && win.webContents.send('menu-action', 'select-scenario', 'CASO_1_NORMAL')
+            },
+            {
+              label: 'Caso 2: Divergência Crítica de Identidade (Mariana Alves)',
+              click: () => win && win.webContents.send('menu-action', 'select-scenario', 'CASO_2_DIVERGENCIA_CRITICA')
+            },
+            {
+              label: 'Caso 3: Divergência Cadastral e Cronológica (Sebastião)',
+              click: () => win && win.webContents.send('menu-action', 'select-scenario', 'CASO_3_DIVERGENCIA_LEVE')
+            },
+            {
+              label: 'Caso 4: Registro Extemporâneo e Causa Violenta (Juliana)',
+              click: () => win && win.webContents.send('menu-action', 'select-scenario', 'CASO_4_EXTEMPORANEO_VIOLENTA')
+            }
+          ]
+        },
+        { type: 'separator' },
+        {
+          label: 'Exportar Laudo Oficial CNJ (.pdf)...',
+          accelerator: 'CmdOrCtrl+P',
+          click: () => win && win.webContents.send('menu-action', 'open-cnj-report')
+        },
+        {
+          label: 'Exportar Trilha de Auditoria SHA-256 (.json)...',
+          accelerator: 'CmdOrCtrl+S',
+          click: () => win && win.webContents.send('menu-action', 'export-audit-json')
+        },
+        {
+          label: 'Exportar Laudo Técnico (.txt)...',
+          click: () => win && win.webContents.send('menu-action', 'export-report-txt')
+        },
+        { type: 'separator' },
+        {
+          label: 'Bloquear Estação de Trabalho',
+          accelerator: 'CmdOrCtrl+L',
+          click: () => win && win.webContents.send('menu-action', 'logout')
+        },
+        {
+          label: 'Sair do ARIA Desktop',
+          accelerator: isMac ? 'Cmd+Q' : 'Alt+F4',
+          role: 'quit'
+        }
+      ]
+    },
+    {
+      label: '&Quality Gate',
+      submenu: [
+        {
+          label: 'Reavaliar Regras Determinísticas',
+          accelerator: 'F5',
+          click: () => win && win.webContents.send('menu-action', 'trigger-reevaluate')
+        },
+        { type: 'separator' },
+        {
+          label: 'Visualizar Minuta do Assento de Óbito',
+          accelerator: 'CmdOrCtrl+M',
+          click: () => win && win.webContents.send('menu-action', 'open-certificate')
+        },
+        {
+          label: 'Inspecionar Evidências OCR da D.O.',
+          accelerator: 'CmdOrCtrl+O',
+          click: () => win && win.webContents.send('menu-action', 'open-ocr')
+        }
+      ]
+    },
+    {
+      label: '&Segurança',
+      submenu: [
+        {
+          label: 'Barramentos Federados & mTLS ICP-Brasil...',
+          accelerator: 'CmdOrCtrl+T',
+          click: () => win && win.webContents.send('menu-action', 'open-mtls')
+        },
+        {
+          label: 'Trilha de Auditoria Criptográfica...',
+          click: () => win && win.webContents.send('menu-action', 'open-audit')
+        }
+      ]
+    },
+    {
+      label: '&Licença',
+      submenu: [
+        {
+          label: 'Gerenciar Licença SaaS Local-First...',
+          accelerator: 'CmdOrCtrl+K',
+          click: () => win && win.webContents.send('menu-action', 'open-license')
+        }
+      ]
+    },
+    {
+      label: '&Exibir',
+      submenu: [
+        {
+          label: 'Alternar Modo Escuro / Claro',
+          accelerator: 'CmdOrCtrl+Shift+D',
+          click: () => win && win.webContents.send('menu-action', 'toggle-theme')
+        },
+        { type: 'separator' },
+        { label: 'Recarregar', role: 'reload' },
+        { label: 'Forçar Recarregamento', role: 'forceReload' },
+        {
+          label: 'Alternar Ferramentas do Desenvolvedor',
+          accelerator: 'F12',
+          role: 'toggleDevTools'
+        },
+        { type: 'separator' },
+        { label: 'Alternar Tela Cheia', accelerator: 'F11', role: 'togglefullscreen' }
+      ]
+    },
+    {
+      label: 'A&juda',
+      submenu: [
+        {
+          label: 'Guia de Empacotamento Windows (.EXE)...',
+          accelerator: 'F2',
+          click: () => win && win.webContents.send('menu-action', 'open-packager')
+        },
+        {
+          label: 'Sobre o ARIA Desktop...',
+          accelerator: 'F1',
+          click: () => win && win.webContents.send('menu-action', 'open-about')
+        }
+      ]
+    }
+  ];
+
+  return Menu.buildFromTemplate(template);
+}
+
 function createWindow() {
   const iconPath = path.join(__dirname, 'icon.ico');
   const windowConfig = {
@@ -24,6 +176,7 @@ function createWindow() {
     title: 'ARIA - Assistente de Pré-Lavratura e Quality Gate para Atos de Óbito',
     backgroundColor: '#020617',
     frame: true,
+    // autoHideMenuBar: true no Windows oculta a barra e a exibe nativamente ao pressionar ALT
     autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
@@ -40,8 +193,9 @@ function createWindow() {
 
   mainWindow = new BrowserWindow(windowConfig);
 
-  // Oculta a barra de menus do sistema operacional para preservar a barra cartorária customizada
-  mainWindow.setMenuBarVisibility(false);
+  // Configura o Menu de Aplicação nativo do Windows
+  const appMenu = buildApplicationMenu(mainWindow);
+  Menu.setApplicationMenu(appMenu);
 
   const distHtmlPath = path.join(__dirname, '../dist/index.html');
   const hasDist = fs.existsSync(distHtmlPath);

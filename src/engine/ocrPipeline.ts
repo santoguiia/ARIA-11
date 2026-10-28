@@ -6,14 +6,15 @@ import {
   OCRDocumentState, 
   OCRFieldExtraction, 
   OCRBoundingBox,
-  DocumentValidationResult 
+  DocumentValidationResult
 } from '../types';
 import { 
   classifyDocumentType, 
   extractEntitiesWithAnchorOCR, 
   OCRWord 
 } from './anchorOcrEngine';
-import { requestLLMOCR } from './llmClient';
+
+export type OCREngineMode = 'LOCAL_FAST' | 'HYBRID_VISION';
 
 // Set up PDF.js worker if in browser
 if (typeof window !== 'undefined') {
@@ -546,7 +547,8 @@ export function parseStructuredDeathRecord(
 export async function processUploadedOCRFile(
   file: File,
   currentRecord: DeathRecordData,
-  onProgress?: (step: string, percent: number) => void
+  onProgress?: (step: string, percent: number) => void,
+  engineMode: OCREngineMode = 'LOCAL_FAST'
 ): Promise<{
   state: OCRDocumentState;
   parsedRecord: DeathRecordData;
@@ -571,27 +573,110 @@ export async function processUploadedOCRFile(
   // 1. Obter dimensões nativas reais da imagem carregada
   const dimensions = await getImageDimensions(imageUrl);
 
-  // 2. Tentar processamento primário com Vision LLM (Multimodal Qwen2-VL)
-  onProgress?.('Enviando documento para o motor multimodal local (Qwen2-VL)...', 30);
+  // 2. Se o modo for LOCAL_FAST (preferência explícita do usuário: sem dependência de API cloud),
+  // processa diretamente no dispositivo com Tesseract e âncoras geométricas
+  if (engineMode === 'LOCAL_FAST') {
+    onProgress?.('Executando OCR local rápido (Tesseract On-Device / Sem API)...', 30);
+    const ocrResult = await runLocalTesseractOCR(imageUrl, onProgress);
+
+    onProgress?.('Validando layout e classificando tipo de documento...', 65);
+    const classification = classifyDocumentType(ocrResult.rawText, ocrResult.words, file.name);
+
+    onProgress?.('Mapeando âncoras semânticas e delimitando Bounding Boxes...', 85);
+    const { extractedRecord, confidenceMap, fieldExtractions } = extractEntitiesWithAnchorOCR(
+      ocrResult.rawText,
+      ocrResult.words,
+      dimensions.naturalWidth,
+      dimensions.naturalHeight
+    );
+
+    onProgress?.('Concluído com sucesso (OCR Local On-Device).', 100);
+
+    const finalRecord: DeathRecordData = {
+      numeroDO: extractedRecord.numeroDO || (classification.type === 'DECLARACAO_OBITO' ? 'NÃO DETECTADO' : 'NÃO CONSTA (INCOMPATÍVEL)'),
+      nomeFalecido: extractedRecord.nomeFalecido || 'NÃO LOCALIZADO NO DOCUMENTO',
+      cpf: extractedRecord.cpf || '',
+      rg: extractedRecord.rg || '',
+      rgOrgaoEmissor: extractedRecord.rgOrgaoEmissor || '',
+      dataNascimento: extractedRecord.dataNascimento || '',
+      sexo: (extractedRecord.sexo || currentRecord?.sexo || 'I') as 'M' | 'F' | 'I',
+      corRaca: (extractedRecord.corRaca || currentRecord?.corRaca || 'PARDA') as 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA',
+      estadoCivil: (extractedRecord.estadoCivil || currentRecord?.estadoCivil || 'SOLTEIRO') as 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE',
+      dataCasamento: extractedRecord.dataCasamento || '',
+      nomeConjuge: extractedRecord.nomeConjuge || '',
+      nomeMae: extractedRecord.nomeMae || '',
+      nomePai: extractedRecord.nomePai || '',
+      dataObito: extractedRecord.dataObito || '',
+      horaObito: extractedRecord.horaObito || '',
+      localObito: extractedRecord.localObito || '',
+      tipoLocal: (extractedRecord.tipoLocal || currentRecord?.tipoLocal || 'HOSPITAL') as 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS',
+      municipioObito: extractedRecord.municipioObito || '',
+      ufObito: extractedRecord.ufObito || '',
+      causaMortis: extractedRecord.causaMortis || '',
+      cid10: extractedRecord.cid10 || '',
+      nomeMedico: extractedRecord.nomeMedico || '',
+      crmMedico: extractedRecord.crmMedico || '',
+      ufCrm: extractedRecord.ufCrm || '',
+      sepultamentoCremacao: extractedRecord.sepultamentoCremacao || '',
+      cemiterio: extractedRecord.cemiterio || '',
+      deixouBens: (extractedRecord.deixouBens || currentRecord?.deixouBens || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+      deixouTestamento: (extractedRecord.deixouTestamento || currentRecord?.deixouTestamento || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+      deixouFilhos: (extractedRecord.deixouFilhos || currentRecord?.deixouFilhos || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+      qtdFilhos: extractedRecord.qtdFilhos || 0,
+      nomesFilhos: extractedRecord.nomesFilhos || '',
+      nomeDeclarante: extractedRecord.nomeDeclarante || '',
+      qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || ''
+    };
+
+    const documentState: OCRDocumentState = {
+      id: `OCR-DOC-${Date.now()}`,
+      fileName: file.name,
+      fileType: isPdf ? 'PDF' : 'IMAGE',
+      imageUrl,
+      extractedText: ocrResult.rawText || 'Texto processado localmente no dispositivo (Tesseract).',
+      fields: fieldExtractions,
+      isProcessing: false,
+      processingProgress: 100,
+      processingStep: 'Concluído',
+      timestamp: new Date().toLocaleTimeString('pt-BR'),
+      imageDimensions: dimensions,
+      classification,
+      engine: 'OCR Local Rápido (Tesseract On-Device)'
+    };
+
+    return {
+      state: documentState,
+      parsedRecord: finalRecord,
+      confidenceMap
+    };
+  }
+
+  // 3. Processamento Híbrido Opcional com Vision LLM (com fallback automático se indisponível)
+  onProgress?.('Consultando serviço de visão computacional multimodal...', 30);
   let visionSuccess = false;
   let visionData: any = null;
-  let visionSource = 'Qwen2-VL-2B Multimodal (Local Edge)';
 
   try {
-    const ocrRes = await requestLLMOCR({
-      imageBase64: imageUrl,
-      mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
-      fileName: file.name
+    const res = await fetch('/api/vision-ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        imageBase64: imageUrl,
+        mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
+        fileName: file.name
+      })
     });
 
-    if (ocrRes.success && ocrRes.data && ocrRes.data.fields && ocrRes.data.fields.length > 0) {
-      visionSuccess = true;
-      visionData = ocrRes.data;
-      if (ocrRes.source) visionSource = ocrRes.source;
-      onProgress?.('Motor multimodal mapeou campos e coordenadas com sucesso...', 80);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data && json.data.fields && json.data.fields.length > 0) {
+        visionSuccess = true;
+        visionData = json.data;
+        onProgress?.('Vision LLM mapeou campos e Bounding Boxes com sucesso...', 80);
+      }
     }
   } catch (visionErr) {
-    console.warn('Motor multimodal indisponível ou offline. Alternando para OCR Local:', visionErr);
+    console.warn('Vision LLM indisponível ou offline. Alternando para OCR Local:', visionErr);
   }
 
   // 3. FLUXO A: VISION LLM MULTIMODAL PROCESSOU O ARQUIVO
@@ -742,7 +827,7 @@ export async function processUploadedOCRFile(
       timestamp: new Date().toLocaleTimeString('pt-BR'),
       imageDimensions: dimensions,
       classification,
-      engine: visionSource
+      engine: 'Vision LLM (Multimodal)'
     };
 
     return {
@@ -861,7 +946,7 @@ export function createInitialOCRDocumentState(record: DeathRecordData): {
       confidence: 99,
       isCompatibleDO: true
     },
-    engine: 'Vision LLM + OCR Híbrido'
+    engine: 'OCR Local Rápido (Tesseract On-Device)'
   };
 
   return { state, confidenceMap };

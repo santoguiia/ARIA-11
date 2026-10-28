@@ -20,7 +20,8 @@ import {
   FileUp,
   Loader2,
   Eye,
-  Target
+  Target,
+  Scale
 } from 'lucide-react';
 import { DeathRecordData, OCRConfidenceMap, OCRDocumentState } from '../types';
 import { normalizeName, nameSimilarity, validateCPF } from '../engine/validators';
@@ -38,6 +39,7 @@ interface ComparativePanelProps {
   onCopyFromOCR: (field: keyof DeathRecordData) => void;
   onOpenOCRModal: (focusedField?: keyof DeathRecordData) => void;
   onOpenMtlsModal?: () => void;
+  onOpenCNJReportModal?: () => void;
 }
 
 export const ComparativePanel: React.FC<ComparativePanelProps> = ({
@@ -51,7 +53,8 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
   onCopyFromFederada,
   onCopyFromOCR,
   onOpenOCRModal,
-  onOpenMtlsModal
+  onOpenMtlsModal,
+  onOpenCNJReportModal
 }) => {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -314,16 +317,16 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
             </div>
             <div>
               <div className="text-xs font-bold text-white flex items-center space-x-2">
-                <span>Ingestão & Análise com Visão Computacional (LLM / OCR)</span>
-                <span className="text-[9px] bg-indigo-950 text-indigo-300 px-1.5 py-0.2 rounded font-mono border border-indigo-700/80 font-semibold flex items-center space-x-1">
-                  <Sparkles className="w-2.5 h-2.5 text-indigo-400" />
-                  <span>{ocrDocumentState?.engine || 'Vision LLM + OCR Híbrido'}</span>
+                <span>Ingestão & Extração OCR On-Device (Tesseract LGPD)</span>
+                <span className="text-[9px] bg-emerald-950 text-emerald-300 px-1.5 py-0.2 rounded font-mono border border-emerald-700/80 font-semibold flex items-center space-x-1">
+                  <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                  <span>{ocrDocumentState?.engine || 'OCR Local Rápido (Tesseract On-Device)'}</span>
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
                 {isDraggingOver 
-                  ? 'Solte o arquivo escaneado aqui para processar com a Vision LLM...' 
-                  : 'Arraste e solte o documento físico (.pdf, .png, .jpeg) para extração de entidades e Bounding Boxes.'}
+                  ? 'Solte o arquivo escaneado aqui para processamento local...' 
+                  : 'Arraste a Declaração de Óbito física (.pdf, .png, .jpeg) para extração óptica local com total conformidade LGPD.'}
               </p>
             </div>
           </div>
@@ -344,8 +347,19 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               title="Abrir visualizador com suporte a Bounding Boxes e inspeção óptica"
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>Visualizador OCR & Bounding Boxes</span>
+              <span>Visualizador OCR</span>
             </button>
+
+            {onOpenCNJReportModal && (
+              <button
+                onClick={onOpenCNJReportModal}
+                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 cursor-pointer"
+                title="Emitir Laudo de Conformidade Oficial e Exportar PDF Certificado pelo CNJ (Provimento nº 149/2023)"
+              >
+                <Scale className="w-3.5 h-3.5" />
+                <span>Laudo CNJ (PDF)</span>
+              </button>
+            )}
           </div>
         </div>
 

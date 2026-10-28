@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   testMtlsHandshake: (busId) => ipcRenderer.invoke('test-mtls-handshake', busId),
   getNodeStatus: () => ipcRenderer.invoke('get-node-status'),
 
+  // Canal de eventos do Menu Nativo do Windows (disparado ao pressionar Alt e clicar nos itens)
+  onMenuAction: (callback) => {
+    const handler = (_event, action, data) => callback(action, data);
+    ipcRenderer.on('menu-action', handler);
+    return () => ipcRenderer.removeListener('menu-action', handler);
+  },
+
   // Módulo de Licenciamento SaaS Local-First
   license: {
     getStatus: () => ipcRenderer.invoke('license:get-status'),

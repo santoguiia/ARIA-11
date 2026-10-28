@@ -365,6 +365,7 @@ declare global {
         message?: string;
       }>;
       getNodeStatus?: () => Promise<any>;
+      onMenuAction?: (callback: (action: string, data?: any) => void) => (() => void) | void;
 
       license?: {
         getStatus: () => Promise<LicenseInfo>;

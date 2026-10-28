@@ -33,7 +33,6 @@ import { getLLMStatus } from './engine/llmClient';
 
 import { LoginScreen } from './components/LoginScreen';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
-import { DesktopMenuBar } from './components/DesktopMenuBar';
 import { ComparativePanel } from './components/ComparativePanel';
 import { QualityGateDrawer } from './components/QualityGateDrawer';
 import { AuditTrailModal } from './components/AuditTrailModal';
@@ -44,6 +43,7 @@ import { AboutModal } from './components/AboutModal';
 import { FederatedMtlsModal } from './components/FederatedMtlsModal';
 import { LicenseManagerModal } from './components/LicenseManagerModal';
 import { UpgradeAlertModal } from './components/UpgradeAlertModal';
+import { CNJReportModal } from './components/CNJReportModal';
 
 export default function App() {
   // Current active scenario
@@ -139,6 +139,7 @@ export default function App() {
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
   const [isMtlsModalOpen, setIsMtlsModalOpen] = useState(false);
   const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
+  const [isCNJReportModalOpen, setIsCNJReportModalOpen] = useState(false);
   const [upgradeAlertTier, setUpgradeAlertTier] = useState<LicenseTier | null>(null);
 
   // Licensing and Local LLM State
@@ -307,7 +308,8 @@ export default function App() {
             processingProgress: percent,
             processingStep: step
           }));
-        }
+        },
+        'LOCAL_FAST'
       );
 
       setOcrDocumentState(result.state);
@@ -530,6 +532,121 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
     showToast('Laudo técnico (.txt) exportado com sucesso.');
   };
 
+  // Integração com o Menu Nativo do Windows (Electron) e atalhos de teclado do desktop
+  useEffect(() => {
+    // 1. Escuta eventos disparados pelo Menu Nativo do Windows (ativado ao pressionar ALT)
+    let cleanupElectron: (() => void) | void;
+    if (window.electronAPI?.onMenuAction) {
+      cleanupElectron = window.electronAPI.onMenuAction((action: string, data?: any) => {
+        switch (action) {
+          case 'reset-scenario':
+            handleResetToDefaults();
+            break;
+          case 'select-scenario': {
+            const sc = MOCK_SCENARIOS.find(s => s.id === data);
+            if (sc) handleSelectScenario(sc);
+            break;
+          }
+          case 'open-cnj-report':
+            setIsCNJReportModalOpen(true);
+            break;
+          case 'export-audit-json':
+            handleExportAuditJSON();
+            break;
+          case 'export-report-txt':
+            handleExportReportTXT();
+            break;
+          case 'logout':
+            handleLogout();
+            break;
+          case 'trigger-reevaluate':
+            showToast('Regras reavaliadas pelo motor determinístico.');
+            break;
+          case 'open-certificate':
+            setIsCertificateModalOpen(true);
+            break;
+          case 'open-ocr':
+            setIsOCRModalOpen(true);
+            break;
+          case 'open-mtls':
+            setIsMtlsModalOpen(true);
+            break;
+          case 'open-audit':
+            setIsAuditModalOpen(true);
+            break;
+          case 'open-license':
+            setIsLicenseModalOpen(true);
+            break;
+          case 'toggle-theme':
+            handleToggleDarkMode();
+            break;
+          case 'open-packager':
+            setIsPackagerModalOpen(true);
+            break;
+          case 'open-about':
+            setIsAboutModalOpen(true);
+            break;
+          default:
+            break;
+        }
+      });
+    }
+
+    // 2. Atalhos de teclado no padrão desktop do Windows
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key.toLowerCase() === 'p') {
+          e.preventDefault();
+          setIsCNJReportModalOpen(true);
+        } else if (e.key.toLowerCase() === 's') {
+          e.preventDefault();
+          handleExportAuditJSON();
+        } else if (e.key.toLowerCase() === 'n') {
+          e.preventDefault();
+          handleResetToDefaults();
+        } else if (e.key.toLowerCase() === 'm') {
+          e.preventDefault();
+          setIsCertificateModalOpen(true);
+        } else if (e.key.toLowerCase() === 'o') {
+          e.preventDefault();
+          setIsOCRModalOpen(true);
+        } else if (e.key.toLowerCase() === 't') {
+          e.preventDefault();
+          setIsMtlsModalOpen(true);
+        } else if (e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          setIsLicenseModalOpen(true);
+        } else if (e.key.toLowerCase() === 'l') {
+          e.preventDefault();
+          handleLogout();
+        }
+      } else {
+        if (e.key === 'F1') {
+          e.preventDefault();
+          setIsAboutModalOpen(true);
+        } else if (e.key === 'F2') {
+          e.preventDefault();
+          setIsPackagerModalOpen(true);
+        } else if (e.key === 'F5') {
+          e.preventDefault();
+          showToast('Regras reavaliadas pelo motor determinístico.');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      if (typeof cleanupElectron === 'function') cleanupElectron();
+    };
+  }, [declaracao, ocr, auditLogs, currentScenario, gateEvaluation, isDarkMode]);
+
   // If not logged in, show the full clerk login screen
   if (!isLoggedIn) {
     return (
@@ -564,31 +681,7 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
         onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
       />
 
-      {/* 2. Desktop Application Menu Bar */}
-      <DesktopMenuBar
-        currentScenario={currentScenario}
-        onSelectScenario={handleSelectScenario}
-        onOpenAudit={() => setIsAuditModalOpen(true)}
-        onOpenOCRModal={() => setIsOCRModalOpen(true)}
-        onOpenCertificateModal={() => setIsCertificateModalOpen(true)}
-        onOpenPackagerModal={() => setIsPackagerModalOpen(true)}
-        onOpenAboutModal={() => setIsAboutModalOpen(true)}
-        onExportAuditJSON={handleExportAuditJSON}
-        onExportReportTXT={handleExportReportTXT}
-        onResetToDefaults={handleResetToDefaults}
-        onTriggerReevaluate={() => {
-          showToast('Regras reavaliadas pelo motor determinístico.');
-        }}
-        onOpenMtlsModal={() => setIsMtlsModalOpen(true)}
-        onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-        onLogout={handleLogout}
-        hasImpediments={gateEvaluation.hasImpediments}
-        hasPendingAlerts={gateEvaluation.hasPendingAlerts}
-      />
-
-      {/* 3. Main Working Area: 3-Column Comparative Panel + Quality Gate Drawer */}
+      {/* 2. Main Working Area: 3-Column Comparative Panel + Quality Gate Drawer */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
         {/* Central 3-Column Comparative View */}
         <ComparativePanel
@@ -603,6 +696,7 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           onCopyFromOCR={handleCopyFromOCR}
           onOpenOCRModal={handleOpenOCRModal}
           onOpenMtlsModal={() => setIsMtlsModalOpen(true)}
+          onOpenCNJReportModal={() => setIsCNJReportModalOpen(true)}
         />
 
         {/* Right Drawer: Quality Gate Rules, Justifications & Lavratura */}
@@ -615,6 +709,7 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           onUpdateJustification={handleUpdateJustification}
           onLavrarAto={handleLavrarAto}
           onOpenAuditModal={() => setIsAuditModalOpen(true)}
+          onOpenCNJReportModal={() => setIsCNJReportModalOpen(true)}
           onApplySuggestedFix={(field, value) => {
             handleUpdateDeclaracaoField(field, value);
             showToast(`Campo ${String(field).toUpperCase()} atualizado para: ${value}`);
@@ -744,6 +839,23 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           setUpgradeAlertTier(null);
           setIsLicenseModalOpen(true);
         }}
+      />
+
+      <CNJReportModal
+        isOpen={isCNJReportModalOpen}
+        onClose={() => setIsCNJReportModalOpen(false)}
+        declaracao={declaracao}
+        ocr={ocr}
+        ocrConfidence={ocrConfidence}
+        federada={federada}
+        evaluationResults={gateEvaluation.results}
+        canLavrar={gateEvaluation.canLavrar}
+        hasImpediments={gateEvaluation.hasImpediments}
+        hasPendingAlerts={gateEvaluation.hasPendingAlerts}
+        justifications={justifications}
+        currentUser={currentUser}
+        auditLogs={auditLogs}
+        ocrDocumentState={ocrDocumentState}
       />
 
     </div>
