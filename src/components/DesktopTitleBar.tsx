@@ -24,17 +24,19 @@ interface DesktopTitleBarProps {
   onToggleDarkMode?: () => void;
   license?: LicenseInfo | null;
   onOpenLicense?: () => void;
+  onOpenLicenseModal?: () => void;
 }
 
 export const DesktopTitleBar: React.FC<DesktopTitleBarProps> = ({
   currentScenarioTitle,
-  onOpenAudit,
   currentUser,
   onLogout,
   license,
-  onOpenLicense
+  onOpenLicense,
+  onOpenLicenseModal
 }) => {
   const [time, setTime] = React.useState<string>('');
+  const handleOpenLicense = onOpenLicense || onOpenLicenseModal;
 
   React.useEffect(() => {
     const update = () => {
@@ -76,9 +78,9 @@ export const DesktopTitleBar: React.FC<DesktopTitleBarProps> = ({
         </div>
 
         {/* License Pill */}
-        {license && onOpenLicense && (
+        {license && handleOpenLicense && (
           <button
-            onClick={onOpenLicense}
+            onClick={handleOpenLicense}
             className={`flex items-center space-x-1.5 px-2 py-0.5 rounded border text-[10px] font-medium transition-all hover:brightness-110 ${tierConfig.badgeColor}`}
             title={`Licença ${tierConfig.label} (${license.daysRemaining} dias restantes offline). Clique para gerenciar.`}
           >
