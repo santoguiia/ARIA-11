@@ -27,13 +27,13 @@ function buildApplicationMenu(win) {
       label: '&Arquivo',
       submenu: [
         {
-          label: 'Novo Assento / Reiniciar Caso',
+          label: 'Nova Lavratura Limpa (Ambiente de Produção)',
           accelerator: 'CmdOrCtrl+N',
-          click: () => win && win.webContents.send('menu-action', 'reset-scenario')
+          click: () => win && win.webContents.send('menu-action', 'new-clean-lavratura')
         },
         { type: 'separator' },
         {
-          label: 'Cenários de Teste (PoC)',
+          label: 'Cenários de Homologação / Teste (PoC)',
           submenu: [
             {
               label: 'Caso 1: Óbito Consistente e Fluido (Carlos Eduardo)',

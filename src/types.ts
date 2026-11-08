@@ -16,9 +16,9 @@ export interface DeathRecordData {
   rg: string;
   rgOrgaoEmissor: string;
   dataNascimento: string;
-  sexo: 'M' | 'F' | 'I';
-  corRaca: 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA';
-  estadoCivil: 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE';
+  sexo: 'M' | 'F' | 'I' | '';
+  corRaca: 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA' | '';
+  estadoCivil: 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE' | '';
   dataCasamento?: string;
   nomeConjuge?: string;
   nomeMae: string;
@@ -26,7 +26,7 @@ export interface DeathRecordData {
   dataObito: string;
   horaObito: string;
   localObito: string;
-  tipoLocal: 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS';
+  tipoLocal: 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS' | '';
   municipioObito: string;
   ufObito: string;
   causaMortis: string;
@@ -36,16 +36,43 @@ export interface DeathRecordData {
   ufCrm: string;
   sepultamentoCremacao: string;
   cemiterio: string;
-  deixouBens: 'SIM' | 'NAO' | 'IGNORADO';
-  deixouTestamento: 'SIM' | 'NAO' | 'IGNORADO';
-  deixouFilhos: 'SIM' | 'NAO' | 'IGNORADO';
+  deixouBens: 'SIM' | 'NAO' | 'IGNORADO' | '';
+  deixouTestamento: 'SIM' | 'NAO' | 'IGNORADO' | '';
+  deixouFilhos: 'SIM' | 'NAO' | 'IGNORADO' | '';
   qtdFilhos?: number;
   nomesFilhos?: string;
   nomeDeclarante: string;
   qualificacaoDeclarante: string;
+
+  // Informações da Base Federada / Registro Civil SIRC
+  matricula?: string;
+  cnsCartorio?: string;
+  cartorioNome?: string;
+  cartorioEndereco?: string;
+  oficialRegistro?: string;
+  escreventeRegistro?: string;
+  cargoOficial?: string;
+  dataEmissaoCertidao?: string;
+  municipioEmissao?: string;
+  ufEmissao?: string;
+  anotacoesAverbacoes?: string;
+  idadeFalecido?: number;
+  naturalidadeMunicipio?: string;
+  naturalidadeUf?: string;
+  ocupacao?: string;
+  escolaridade?: string;
+  registroTermo?: string;
+  enderecoResidencia?: string;
+  bairroResidencia?: string;
+  municipioResidencia?: string;
+  ufResidencia?: string;
+  cepResidencia?: string;
+  estabelecimentoObito?: string;
+  dataAtestadoMedico?: string;
+  tipoObito?: string;
 }
 
-export type OCRConfidenceMap = Record<keyof DeathRecordData, number>;
+export type OCRConfidenceMap = Partial<Record<keyof DeathRecordData, number>> & Record<string, number>;
 
 export interface OCRBoundingBox {
   x: number; // percent 0-100
@@ -162,13 +189,48 @@ export interface QualityGateRule {
   };
 }
 
+export type BiometricCaptureType = 
+  | 'POLEGAR_DIREITO' 
+  | 'POLEGAR_ESQUERDO' 
+  | 'ASSINATURA_DIGITAL_CAMERA' 
+  | 'ASSINATURA_PAD_TOUCH'
+  | 'FOTO_FACIAL_DECLARANTE';
+
+export interface BiometricRecord {
+  id: string;
+  type: BiometricCaptureType;
+  typeLabel: string;
+  timestamp: string;
+  declaranteNome: string;
+  declaranteCpf?: string;
+  declaranteQualificacao?: string;
+  imageBase64: string;
+  sha256Hash: string;
+  cameraDeviceId?: string;
+  cameraDeviceLabel?: string;
+  operadorMatricula: string;
+  operadorNome: string;
+  cartorioCns?: string;
+  statusConformidade: 'AUTENTICADA' | 'VERIFICADA';
+}
+
 export interface AuditLogEntry {
   id: string;
   timestamp: string;
   operador: string;
   matricula: string;
   cartorio: string;
-  action: 'EVALUATION' | 'JUSTIFICATION_SUBMITTED' | 'LAVRATURA_APROVADA' | 'LAVRATURA_BLOQUEADA' | 'MANUAL_EDIT' | 'SCENARIO_LOADED' | 'OPERADOR_LOGIN' | 'OPERADOR_LOGOUT';
+  action: 
+    | 'EVALUATION' 
+    | 'JUSTIFICATION_SUBMITTED' 
+    | 'LAVRATURA_APROVADA' 
+    | 'LAVRATURA_BLOQUEADA' 
+    | 'MANUAL_EDIT' 
+    | 'SCENARIO_LOADED' 
+    | 'OPERADOR_LOGIN' 
+    | 'OPERADOR_LOGOUT'
+    | 'BIOMETRIC_CAPTURE'
+    | 'SIGNATURE_ATTACHED';
   resumo: string;
   sha256Hash: string;
   previousHash: string;
@@ -183,6 +245,7 @@ export interface AuditLogEntry {
     nomeFalecido: string;
     cpf: string;
   };
+  biometricRecord?: BiometricRecord;
 }
 
 export interface EscreventeUser {
@@ -400,4 +463,109 @@ declare global {
   }
 }
 
+export interface FederatedCitizen {
+  cleanCpf: string;
+  cpf: string;
+  nomeCompleto: string;
+  rg: string;
+  orgaoEmissor: string;
+  sexo: 'M' | 'F' | 'I';
+  corRaca: string;
+  dataNascimento: string; // ISO-8601 (YYYY-MM-DD)
+  idade?: number;
+  naturalidade?: {
+    municipio: string;
+    uf: string;
+  };
+  filiacao: {
+    pai?: string;
+    mae?: string;
+  };
+  genitores?: string[];
+  estadoCivil: string;
+  ultimoConjuge?: string;
+  nomeConjuge?: string;
+  dataCasamento?: string;
+  numeroCertidaoCasamento?: string;
+  numeroCertidaoNascimento?: string;
+  statusSirc: 'ATIVO' | 'OBITO_JA_REGISTRADO' | 'CANCELADO';
+  
+  // Dados do Registro de Óbito Federado (Certidão de Óbito)
+  tipoDocumento?: string;
+  documentoSintetico?: boolean;
+  matriculaObito?: string;
+  cnsCartorio?: string;
+  dataObito?: string;
+  horaObito?: string;
+  localObito?: string;
+  municipioObito?: string;
+  ufObito?: string;
+  causaMorte?: string | null;
+  medicoAtestante?: {
+    nome: string;
+    documento: string;
+    crm?: string;
+    uf?: string;
+    tipoAteste?: string;
+    dataAtestado?: string;
+  };
+  cemiterio?: string;
+  localSepultamentoCremacao?: string | null;
+  declaracoes?: {
+    declarante?: string;
+    existenciaBens?: boolean;
+    existenciaFilhosAnotacao?: string;
+    anotacoesAverbacoes?: string;
+  };
+  emissao?: {
+    dataEmissao?: string;
+    municipio?: string;
+    uf?: string;
+    oficial?: string;
+    escrevente?: string;
+    cargo?: string;
+    enderecoCartorio?: string;
+  };
+
+  // Campos complementares da Declaração de Óbito Federada (ex: Clivia Nunes Rodrigues)
+  viaDocumento?: string;
+  tipoObito?: string;
+  idadeDeclarada?: number;
+  ocupacao?: string;
+  cbo?: string | null;
+  residencia?: {
+    logradouro?: string;
+    numero?: string;
+    complemento?: string | null;
+    cep?: string;
+    bairro?: string;
+    municipio?: string;
+    codigoMunicipio?: string;
+    uf?: string;
+  };
+  ocorrencia?: {
+    tipoLocal?: string;
+    estabelecimento?: string;
+    cnes?: string | null;
+    municipio?: string;
+    codigoMunicipio?: string;
+    uf?: string;
+  };
+  cartorio?: {
+    nome?: string;
+    municipio?: string;
+    uf?: string;
+    registroTermo?: string;
+  };
+  registroTermo?: string;
+  rawJson?: any;
+  updatedAt?: string;
+}
+
+export type FederatedSearchStatus = 
+  | 'IDLE' 
+  | 'BUSCANDO' 
+  | 'VERIFICADO_ONLINE' 
+  | 'NAO_ENCONTRADO' 
+  | 'ERRO_REDE';
 

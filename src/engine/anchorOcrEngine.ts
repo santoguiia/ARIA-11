@@ -240,15 +240,57 @@ const ANCHOR_RULES: AnchorRule[] = [
   {
     field: 'dataObito',
     label: 'Data do Falecimento',
-    anchors: ['11. DATA DO FALECIMENTO', 'DATA DO FALECIMENTO', 'DATA DO ÓBITO', 'DATA DO OBITO', 'FALECIMENTO'],
+    anchors: ['2. DATA DO ÓBITO', '2 DATA DO OBITO', 'DATA DO ÓBITO', 'DATA DO OBITO', '11. DATA DO FALECIMENTO', 'DATA DO FALECIMENTO', 'FALECIMENTO'],
     regexPattern: /\b\d{2}[\/\-\.]\d{2}[\/\-\.]\d{4}\b/,
     expectedDirection: 'BELOW'
   },
   {
     field: 'horaObito',
     label: 'Hora do Óbito',
-    anchors: ['12. HORA DO ÓBITO', 'HORA DO ÓBITO', 'HORA DO OBITO', 'HORA'],
+    anchors: ['3. HORA DO ÓBITO', '3 HORA DO OBITO', '12. HORA DO ÓBITO', 'HORA DO ÓBITO', 'HORA DO OBITO', 'HORA'],
     regexPattern: /\b\d{1,2}[:h\.]\d{2}\b/,
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'naturalidadeMunicipio',
+    label: 'Naturalidade',
+    anchors: ['4. NATURALIDADE', '4 NATURALIDADE', 'NATURALIDADE', 'NATURALIDADE - MUNICÍPIO'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'escolaridade',
+    label: 'Escolaridade',
+    anchors: ['13. ESCOLARIDADE', '13 ESCOLARIDADE', 'ESCOLARIDADE'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'ocupacao',
+    label: 'Ocupação Habitual',
+    anchors: ['14. OCUPAÇÃO HABITUAL', '14 OCUPACAO HABITUAL', 'OCUPAÇÃO HABITUAL', 'OCUPACAO HABITUAL', 'OCUPAÇÃO', 'OCUPACAO'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'enderecoResidencia',
+    label: 'Endereço de Residência',
+    anchors: ['16. LOGRADOURO', '16 LOGRADOURO', 'LOGRADOURO', 'RESIDÊNCIA', 'RESIDENCIA'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'bairroResidencia',
+    label: 'Bairro de Residência',
+    anchors: ['17. BAIRRO/DISTRITO', '17 BAIRRO', 'BAIRRO/DISTRITO', 'BAIRRO'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'municipioResidencia',
+    label: 'Município de Residência',
+    anchors: ['18. MUNICÍPIO DE RESIDÊNCIA', '18 MUNICIPIO DE RESIDENCIA', 'MUNICÍPIO DE RESIDÊNCIA', 'MUNICIPIO DE RESIDENCIA'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'estabelecimentoObito',
+    label: 'Estabelecimento de Ocorrência',
+    anchors: ['21. ESTABELECIMENTO', '21 ESTABELECIMENTO', 'ESTABELECIMENTO', 'HOSPITAL'],
     expectedDirection: 'BELOW'
   },
   {
@@ -260,13 +302,13 @@ const ANCHOR_RULES: AnchorRule[] = [
   {
     field: 'municipioObito',
     label: 'Município / UF do Óbito',
-    anchors: ['14. MUNICÍPIO / UF', 'MUNICÍPIO / UF', 'MUNICIPIO / UF', 'MUNICÍPIO', 'MUNICIPIO'],
+    anchors: ['25. MUNICÍPIO DE OCORRÊNCIA', '25 MUNICIPIO DE OCORRENCIA', '14. MUNICÍPIO / UF', 'MUNICÍPIO / UF', 'MUNICIPIO / UF', 'MUNICÍPIO', 'MUNICIPIO'],
     expectedDirection: 'BELOW'
   },
   {
     field: 'causaMortis',
     label: 'Causa Mortis (Atestado Médico)',
-    anchors: ['15. CAUSA MORTIS', 'CAUSA MORTIS', 'CAUSAS DA MORTE', 'ATESTADO MÉDICO', 'CAUSA BÁSICA'],
+    anchors: ['40. CAUSAS DA MORTE', '15. CAUSA MORTIS', 'CAUSA MORTIS', 'CAUSAS DA MORTE', 'ATESTADO MÉDICO', 'CAUSA BÁSICA'],
     expectedDirection: 'BELOW'
   },
   {
@@ -279,13 +321,13 @@ const ANCHOR_RULES: AnchorRule[] = [
   {
     field: 'nomeMedico',
     label: 'Médico Atestante',
-    anchors: ['17. MÉDICO ATESTANTE', 'MÉDICO ATESTANTE', 'MEDICO ATESTANTE', 'NOME DO MÉDICO', 'DR.'],
+    anchors: ['41. NOME DO MÉDICO', '41 NOME DO MEDICO', '17. MÉDICO ATESTANTE', 'MÉDICO ATESTANTE', 'MEDICO ATESTANTE', 'NOME DO MÉDICO', 'DR.'],
     expectedDirection: 'BELOW'
   },
   {
     field: 'crmMedico',
     label: 'CRM do Médico',
-    anchors: ['18. CRM', 'CRM / CONSELHO', 'CRM:', 'CRM'],
+    anchors: ['42. CRM', '42 CRM', '18. CRM', 'CRM / CONSELHO', 'CRM:', 'CRM'],
     regexPattern: /\b\d{4,7}\b/,
     expectedDirection: 'BELOW'
   },
@@ -296,9 +338,21 @@ const ANCHOR_RULES: AnchorRule[] = [
     expectedDirection: 'BELOW'
   },
   {
+    field: 'cartorioNome',
+    label: 'Cartório de Registro Civil',
+    anchors: ['53. CARTÓRIO', '53 CARTORIO', 'CARTÓRIO', 'CARTORIO', 'OFÍCIO DE REGISTRO CIVIL'],
+    expectedDirection: 'BELOW'
+  },
+  {
+    field: 'registroTermo',
+    label: 'Número de Registro do Óbito',
+    anchors: ['54. REGISTRO', '54 REGISTRO', 'REGISTRO', 'TERMO'],
+    expectedDirection: 'BELOW'
+  },
+  {
     field: 'nomeDeclarante',
     label: 'Nome do Declarante',
-    anchors: ['21. NOME DO DECLARANTE', 'NOME DO DECLARANTE', 'DECLARANTE'],
+    anchors: ['58. DECLARANTE', '58 DECLARANTE', '21. NOME DO DECLARANTE', 'NOME DO DECLARANTE', 'DECLARANTE'],
     expectedDirection: 'BELOW'
   }
 ];
@@ -477,12 +531,6 @@ export function extractEntitiesWithAnchorOCR(
       confidenceScore = Math.round(
         matchedWords.reduce((sum, w) => sum + w.confidence, 0) / matchedWords.length
       );
-    } else if (fallbackRecord && fallbackRecord[rule.field]) {
-      // Se não detectado no OCR do arquivo e temos um fac-símile de fallback:
-      // Deixamos assinalado com confiança moderada e posição calibrada
-      extractedValue = String(fallbackRecord[rule.field] || '');
-      confidenceScore = 88;
-      bbox = toBBox(imgW * 0.05, imgH * 0.1, imgW * 0.4, imgH * 0.13);
     } else {
       extractedValue = '';
       confidenceScore = 0;

@@ -21,9 +21,13 @@ import {
   Loader2,
   Eye,
   Target,
-  Scale
+  Scale,
+  Fingerprint,
+  Camera,
+  RefreshCw,
+  CheckCircle2
 } from 'lucide-react';
-import { DeathRecordData, OCRConfidenceMap, OCRDocumentState } from '../types';
+import { DeathRecordData, OCRConfidenceMap, OCRDocumentState, BiometricRecord, FederatedSearchStatus } from '../types';
 import { normalizeName, nameSimilarity, validateCPF } from '../engine/validators';
 import { DiffHighlight, extractDivergenceSummary } from '../engine/diffHighlight';
 
@@ -38,8 +42,22 @@ interface ComparativePanelProps {
   onCopyFromFederada: (field: keyof DeathRecordData) => void;
   onCopyFromOCR: (field: keyof DeathRecordData) => void;
   onOpenOCRModal: (focusedField?: keyof DeathRecordData) => void;
-  onOpenMtlsModal?: () => void;
   onOpenCNJReportModal?: () => void;
+  onVerifyGoogleOCR?: () => void;
+  googleOcrStatus?: {
+    tested: boolean;
+    ok: boolean;
+    model?: string;
+    latencyMs?: number;
+    isTesting: boolean;
+    message?: string;
+  };
+  biometriaRecord?: BiometricRecord | null;
+  onOpenBiometricModal?: () => void;
+  federatedStatus?: FederatedSearchStatus;
+  onSeedFederatedData?: () => Promise<void> | void;
+  isSeedingFederated?: boolean;
+  onRefreshFederatedSearch?: () => void;
 }
 
 export const ComparativePanel: React.FC<ComparativePanelProps> = ({
@@ -53,8 +71,15 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
   onCopyFromFederada,
   onCopyFromOCR,
   onOpenOCRModal,
-  onOpenMtlsModal,
-  onOpenCNJReportModal
+  onOpenCNJReportModal,
+  onVerifyGoogleOCR,
+  googleOcrStatus,
+  biometriaRecord,
+  onOpenBiometricModal,
+  federatedStatus = 'IDLE',
+  onSeedFederatedData,
+  isSeedingFederated = false,
+  onRefreshFederatedSearch
 }) => {
   const [isDraggingOver, setIsDraggingOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -192,6 +217,15 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
       };
     }
 
+    if (!vDecl && !hasFed && !hasOcr) {
+      return { 
+        status: 'EMPTY', 
+        label: 'Aguardando', 
+        color: 'text-slate-400 bg-slate-800/40 border-slate-700/50',
+        hasDivergence: false
+      };
+    }
+
     return { 
       status: 'NEUTRAL', 
       label: 'Verificado', 
@@ -202,7 +236,18 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
 
   // Helper for OCR badge with click-to-focus on bounding box
   const renderOCRConfidenceBadge = (confidence?: number, field?: keyof DeathRecordData) => {
-    const conf = confidence ?? 90;
+    const hasFieldVal = field ? Boolean(ocr[field] && String(ocr[field]).trim().length > 0) : Boolean(confidence && confidence > 0);
+    if (!hasFieldVal || !confidence || confidence <= 0) {
+      return (
+        <span 
+          className="text-[10px] px-1.5 py-0.5 rounded border border-slate-800 bg-slate-900/60 text-slate-500 font-mono italic shrink-0 ml-1.5 select-none"
+          title="Campo ausente ou não identificado no OCR do documento submetido"
+        >
+          Não consta
+        </span>
+      );
+    }
+    const conf = confidence;
     let badgeClass = 'text-emerald-400 bg-emerald-950/70 border-emerald-700 hover:border-emerald-500 hover:bg-emerald-900/50';
     if (conf < 75) {
       badgeClass = 'text-rose-300 bg-rose-950/80 border-rose-700 font-bold hover:border-rose-500 hover:bg-rose-900/60';
@@ -213,7 +258,7 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
     return (
       <button
         type="button"
-        onClick={() => onOpenOCRModal(field)}
+        onClick={() => field && onOpenOCRModal(field)}
         className={`text-[10px] px-1.5 py-0.5 rounded border font-mono shrink-0 ml-1.5 flex items-center space-x-1 transition-all cursor-pointer group ${badgeClass}`}
         title={field ? `Ver e destacar trecho de "${field}" na D.O. física com Bounding Box (Confiança: ${conf}%)` : `Confiança OCR: ${conf}%`}
       >
@@ -266,24 +311,97 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
         </div>
 
         {/* Column 3 Header */}
-        <div className="px-4 py-2.5 flex items-center justify-between bg-cyan-950/20">
-          <div className="flex items-center space-x-2">
-            <div className="p-1 rounded bg-cyan-900/50 text-cyan-300 border border-cyan-700/50">
-              <Database className="w-3.5 h-3.5" />
+        <div className={`px-4 py-2.5 flex items-center justify-between transition-colors ${
+          federatedStatus === 'BUSCANDO' 
+            ? 'bg-cyan-950/40 border-l border-cyan-500/50' 
+            : federatedStatus === 'VERIFICADO_ONLINE' 
+            ? 'bg-emerald-950/30' 
+            : federatedStatus === 'NAO_ENCONTRADO'
+            ? 'bg-amber-950/20'
+            : federatedStatus === 'ERRO_REDE'
+            ? 'bg-rose-950/30'
+            : 'bg-cyan-950/20'
+        }`}>
+          <div className="flex items-center space-x-2 min-w-0">
+            <div className={`p-1 rounded shrink-0 ${
+              federatedStatus === 'BUSCANDO'
+                ? 'bg-cyan-900/60 text-cyan-300 border border-cyan-500 animate-pulse'
+                : federatedStatus === 'VERIFICADO_ONLINE'
+                ? 'bg-emerald-900/50 text-emerald-300 border border-emerald-600'
+                : federatedStatus === 'NAO_ENCONTRADO'
+                ? 'bg-amber-900/50 text-amber-300 border border-amber-600'
+                : federatedStatus === 'ERRO_REDE'
+                ? 'bg-rose-900/50 text-rose-300 border border-rose-600'
+                : 'bg-cyan-900/50 text-cyan-300 border border-cyan-700/50'
+            }`}>
+              {federatedStatus === 'BUSCANDO' ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : federatedStatus === 'VERIFICADO_ONLINE' ? (
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              ) : federatedStatus === 'NAO_ENCONTRADO' ? (
+                <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+              ) : federatedStatus === 'ERRO_REDE' ? (
+                <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+              ) : (
+                <Database className="w-3.5 h-3.5" />
+              )}
             </div>
-            <div>
-              <span className="text-white font-bold text-xs uppercase tracking-wide">3. Base Federada Central</span>
-              <p className="text-[10px] text-cyan-300 font-normal">CRC Nacional / Receita Federal / SIRC (mTLS)</p>
+            <div className="min-w-0">
+              <div className="flex items-center space-x-1.5">
+                <span className="text-white font-bold text-xs uppercase tracking-wide truncate">
+                  3. Base Federada Central
+                </span>
+                <span className="text-[9px] px-1 py-0.2 rounded font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 font-semibold">
+                  ONLINE
+                </span>
+              </div>
+
+              {federatedStatus === 'BUSCANDO' ? (
+                <p className="text-[10px] text-cyan-300 font-medium flex items-center space-x-1 animate-pulse">
+                  <span>Consultando Base Federada (Firestore)...</span>
+                </p>
+              ) : federatedStatus === 'VERIFICADO_ONLINE' ? (
+                <p className="text-[10px] text-emerald-400 font-semibold flex items-center space-x-1">
+                  <span>Verificado (CRC/RFB Online via Firebase)</span>
+                </p>
+              ) : federatedStatus === 'NAO_ENCONTRADO' ? (
+                <p className="text-[10px] text-amber-300 font-medium flex items-center space-x-1">
+                  <span>Registro Inexistente na Base Federada</span>
+                </p>
+              ) : federatedStatus === 'ERRO_REDE' ? (
+                <p className="text-[10px] text-rose-300 font-medium flex items-center space-x-1">
+                  <span>Falha na conexão mTLS/Firebase</span>
+                </p>
+              ) : (
+                <p className="text-[10px] text-cyan-300 font-normal truncate">
+                  CRC Nacional / Receita Federal / SIRC (Firestore)
+                </p>
+              )}
             </div>
           </div>
-          <button
-            onClick={onOpenMtlsModal}
-            className="text-[10px] bg-cyan-950 hover:bg-cyan-900 text-cyan-300 px-2 py-0.5 rounded font-mono border border-cyan-800 flex items-center space-x-1 transition-colors"
-            title="Verificar status do túnel criptográfico mTLS"
-          >
-            <ShieldCheck className="w-3 h-3 text-emerald-400" />
-            <span>FONTE C</span>
-          </button>
+
+          <div className="flex items-center space-x-1.5 shrink-0">
+            {onSeedFederatedData && (
+              <button
+                type="button"
+                onClick={onSeedFederatedData}
+                disabled={isSeedingFederated}
+                className="text-[10px] bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-cyan-300 px-2 py-0.5 rounded font-mono border border-cyan-800/80 flex items-center space-x-1 transition-colors cursor-pointer"
+                title="Sincronizar/Atualizar registros canônicos na coleção federated_citizens do Firestore"
+              >
+                <RefreshCw className={`w-2.5 h-2.5 ${isSeedingFederated ? 'animate-spin text-cyan-400' : 'text-cyan-400'}`} />
+                <span>{isSeedingFederated ? 'Sincronizando...' : 'Seed CRC'}</span>
+              </button>
+            )}
+
+            <span
+              className="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded font-mono border border-cyan-800 flex items-center space-x-1"
+              title="Base Federada Conectada via túnel seguro mTLS / Firestore"
+            >
+              <ShieldCheck className="w-3 h-3 text-emerald-400" />
+              <span>FONTE C</span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -316,22 +434,49 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               <UploadCloud className="w-4 h-4" />
             </div>
             <div>
-              <div className="text-xs font-bold text-white flex items-center space-x-2">
-                <span>Ingestão & Extração OCR On-Device (Tesseract LGPD)</span>
-                <span className="text-[9px] bg-emerald-950 text-emerald-300 px-1.5 py-0.2 rounded font-mono border border-emerald-700/80 font-semibold flex items-center space-x-1">
+              <div className="text-xs font-bold text-white flex items-center space-x-2 flex-wrap gap-y-1">
+                <span>Ingestão & Extração OCR Multimodal (Google Gemini Vision AI)</span>
+                <span className="text-[9px] bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded font-mono border border-emerald-700/80 font-semibold flex items-center space-x-1">
                   <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
-                  <span>{ocrDocumentState?.engine || 'OCR Local Rápido (Tesseract On-Device)'}</span>
+                  <span>{ocrDocumentState?.engine || 'Google Gemini Vision AI (gemini-3.8-flash)'}</span>
                 </span>
+                {googleOcrStatus?.ok && (
+                  <span className="text-[9px] bg-cyan-950 text-cyan-300 px-1.5 py-0.5 rounded font-mono border border-cyan-700/80 font-medium flex items-center space-x-1">
+                    <Sparkles className="w-2.5 h-2.5 text-cyan-400" />
+                    <span>Google API Ativa ({googleOcrStatus.latencyMs}ms)</span>
+                  </span>
+                )}
               </div>
               <p className="text-[11px] text-slate-400">
                 {isDraggingOver 
-                  ? 'Solte o arquivo escaneado aqui para processamento local...' 
-                  : 'Arraste a Declaração de Óbito física (.pdf, .png, .jpeg) para extração óptica local com total conformidade LGPD.'}
+                  ? 'Solte o arquivo escaneado aqui para processamento com a Google Gemini Vision API...' 
+                  : 'Arraste a Declaração de Óbito física (.pdf, .png, .jpeg) para extração óptica multimodal de 31 entidades e Bounding Boxes com a Google Vision API.'}
               </p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2 shrink-0 flex-wrap gap-y-1">
+            {onVerifyGoogleOCR && (
+              <button
+                onClick={onVerifyGoogleOCR}
+                disabled={googleOcrStatus?.isTesting}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-emerald-400 border border-emerald-500/40 rounded-lg text-xs font-semibold shadow-sm transition-colors flex items-center space-x-1.5 cursor-pointer"
+                title="Testar em tempo real a comunicação e tempo de resposta do OCR com a Google Gemini Vision API"
+              >
+                {googleOcrStatus?.isTesting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+                    <span>Verificando Google API...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Testar Google OCR</span>
+                  </>
+                )}
+              </button>
+            )}
+
             <button
               onClick={() => fileInputRef.current?.click()}
               className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold shadow-sm transition-colors flex items-center space-x-1.5 cursor-pointer"
@@ -775,7 +920,18 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               col2={
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-300">
-                    <DiffHighlight current={ocr.sexo === 'M' ? 'Masc.' : 'Fem.'} reference={declaracao.sexo === 'M' ? 'Masc.' : 'Fem.'} /> | {ocr.corRaca}
+                    {ocr.sexo || ocr.corRaca ? (
+                      <>
+                        <DiffHighlight 
+                          current={ocr.sexo ? (ocr.sexo === 'M' ? 'Masc.' : ocr.sexo === 'F' ? 'Fem.' : 'Ignorado') : '---'} 
+                          reference={declaracao.sexo ? (declaracao.sexo === 'M' ? 'Masc.' : declaracao.sexo === 'F' ? 'Fem.' : 'Ignorado') : '---'} 
+                        />
+                        {' | '}
+                        {ocr.corRaca || '---'}
+                      </>
+                    ) : (
+                      <span className="text-slate-500 italic text-[11px]">Não consta na D.O.</span>
+                    )}
                   </span>
                   {renderOCRConfidenceBadge(ocrConfidence.sexo, 'sexo')}
                 </div>
@@ -791,6 +947,143 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
                       onCopyFromFederada('corRaca');
                     }}
                     title="Copiar da base central"
+                  />
+                </div>
+              }
+            />
+
+            {/* ROW: Naturalidade & Ocupação Habitual (Campos 4 e 14 da D.O.) */}
+            <CompareRow
+              label="Naturalidade & Ocupação Habitual"
+              field="naturalidadeMunicipio"
+              status={getFieldStatus('naturalidadeMunicipio')}
+              col1={
+                <div className="space-y-1">
+                  <div className="flex space-x-1">
+                    <input
+                      type="text"
+                      placeholder="Município de Naturalidade"
+                      value={declaracao.naturalidadeMunicipio || ''}
+                      onChange={(e) => onUpdateDeclaracaoField('naturalidadeMunicipio', e.target.value)}
+                      className="w-3/4 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="UF"
+                      value={declaracao.naturalidadeUf || ''}
+                      onChange={(e) => onUpdateDeclaracaoField('naturalidadeUf', e.target.value)}
+                      className="w-1/4 bg-slate-950 border border-slate-700 rounded px-1 py-1 text-xs text-white text-center uppercase"
+                    />
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Ocupação Habitual (ex: Auxiliar Administrativo)"
+                    value={declaracao.ocupacao || ''}
+                    onChange={(e) => onUpdateDeclaracaoField('ocupacao', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                  />
+                </div>
+              }
+              col2={
+                <div className="text-xs space-y-0.5">
+                  <div className="text-slate-200">
+                    {ocr.naturalidadeMunicipio ? (
+                      <DiffHighlight current={`${ocr.naturalidadeMunicipio}${ocr.naturalidadeUf ? ' - ' + ocr.naturalidadeUf : ''}`} reference={`${declaracao.naturalidadeMunicipio || ''}${declaracao.naturalidadeUf ? ' - ' + declaracao.naturalidadeUf : ''}`} />
+                    ) : (
+                      <span className="text-slate-500 italic text-[11px]">Não consta na D.O.</span>
+                    )}
+                  </div>
+                  <div className="text-slate-400">
+                    {ocr.ocupacao ? (
+                      <DiffHighlight current={ocr.ocupacao} reference={declaracao.ocupacao || ''} />
+                    ) : (
+                      <span className="text-slate-500 italic text-[11px]">Ocupação: não consta</span>
+                    )}
+                  </div>
+                  {renderOCRConfidenceBadge(ocrConfidence.naturalidadeMunicipio, 'naturalidadeMunicipio')}
+                </div>
+              }
+              col3={
+                <div className="flex items-center justify-between text-xs">
+                  <div>
+                    <div className="text-cyan-300">
+                      {federada.naturalidadeMunicipio ? `${federada.naturalidadeMunicipio} - ${federada.naturalidadeUf || ''}` : '---'}
+                    </div>
+                    <div className="text-cyan-400 text-[11px]">
+                      {federada.ocupacao || '---'}
+                    </div>
+                  </div>
+                  <CopyAction
+                    onCopy={() => {
+                      if (federada.naturalidadeMunicipio) onCopyFromFederada('naturalidadeMunicipio');
+                      if (federada.naturalidadeUf) onCopyFromFederada('naturalidadeUf');
+                      if (federada.ocupacao) onCopyFromFederada('ocupacao');
+                    }}
+                    title="Copiar naturalidade e ocupação"
+                  />
+                </div>
+              }
+            />
+
+            {/* ROW: Endereço de Residência (Bloco II da D.O.) */}
+            <CompareRow
+              label="Endereço de Residência"
+              field="enderecoResidencia"
+              status={getFieldStatus('enderecoResidencia')}
+              col1={
+                <div className="space-y-1">
+                  <input
+                    type="text"
+                    placeholder="Logradouro e número (ex: Praça da Sé, 2817)"
+                    value={declaracao.enderecoResidencia || ''}
+                    onChange={(e) => onUpdateDeclaracaoField('enderecoResidencia', e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs text-white"
+                  />
+                  <div className="flex space-x-1">
+                    <input
+                      type="text"
+                      placeholder="Bairro"
+                      value={declaracao.bairroResidencia || ''}
+                      onChange={(e) => onUpdateDeclaracaoField('bairroResidencia', e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-xs text-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Município/UF"
+                      value={declaracao.municipioResidencia || ''}
+                      onChange={(e) => onUpdateDeclaracaoField('municipioResidencia', e.target.value)}
+                      className="w-1/2 bg-slate-950 border border-slate-700 rounded px-1.5 py-1 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              }
+              col2={
+                <div className="text-xs space-y-0.5">
+                  <div className="text-slate-200">
+                    {ocr.enderecoResidencia ? (
+                      <DiffHighlight current={ocr.enderecoResidencia} reference={declaracao.enderecoResidencia || ''} />
+                    ) : (
+                      <span className="text-slate-500 italic text-[11px]">Não consta na D.O.</span>
+                    )}
+                  </div>
+                  <div className="text-slate-400">
+                    {ocr.bairroResidencia || ocr.municipioResidencia ? (
+                      `${ocr.bairroResidencia || ''} ${ocr.municipioResidencia ? '• ' + ocr.municipioResidencia : ''} ${ocr.ufResidencia || ''}`
+                    ) : null}
+                  </div>
+                  {renderOCRConfidenceBadge(ocrConfidence.enderecoResidencia, 'enderecoResidencia')}
+                </div>
+              }
+              col3={
+                <div className="flex items-center justify-between text-xs">
+                  <div className="text-cyan-300">
+                    {federada.enderecoResidencia || '---'}
+                  </div>
+                  <CopyAction
+                    onCopy={() => {
+                      if (federada.enderecoResidencia) onCopyFromFederada('enderecoResidencia');
+                    }}
+                    title="Copiar endereço de residência"
                   />
                 </div>
               }
@@ -927,7 +1220,11 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               col2={
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-slate-200">
-                    <DiffHighlight current={ocr.estadoCivil} reference={declaracao.estadoCivil} />
+                    {ocr.estadoCivil ? (
+                      <DiffHighlight current={ocr.estadoCivil} reference={declaracao.estadoCivil} />
+                    ) : (
+                      <span className="text-slate-500 italic text-[11px]">Não consta na D.O.</span>
+                    )}
                   </span>
                   {renderOCRConfidenceBadge(ocrConfidence.estadoCivil, 'estadoCivil')}
                 </div>
@@ -1278,11 +1575,12 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               col2={
                 <div className="text-xs space-y-0.5">
                   <div className="text-slate-200">
-                    <DiffHighlight current={ocr.localObito} reference={declaracao.localObito} />
+                    <DiffHighlight current={ocr.localObito || ocr.estabelecimentoObito || '---'} reference={declaracao.localObito} />
                   </div>
                   <div className="text-slate-400">
-                    <DiffHighlight current={ocr.municipioObito} reference={declaracao.municipioObito} />/{ocr.ufObito}
+                    <DiffHighlight current={ocr.municipioObito || '---'} reference={declaracao.municipioObito} />/{ocr.ufObito || '---'}
                   </div>
+                  {renderOCRConfidenceBadge(ocrConfidence.localObito || ocrConfidence.estabelecimentoObito, 'localObito')}
                 </div>
               }
               col3={
@@ -1359,19 +1657,19 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
               col3={
                 <div className="flex items-center justify-between text-xs">
                   <div>
-                    <div className="text-cyan-300">
+                    <div className="text-cyan-300 font-semibold">
                       <DiffHighlight current={federada.sepultamentoCremacao} reference={declaracao.sepultamentoCremacao} />
                     </div>
-                    <div className="text-cyan-400 text-[11px]">
-                      <DiffHighlight current={federada.cemiterio} reference={declaracao.cemiterio} />
+                    <div className="text-cyan-400 text-[11px] font-medium">
+                      <DiffHighlight current={federada.cemiterio || (federada.sepultamentoCremacao ? '---' : '')} reference={declaracao.cemiterio} />
                     </div>
                   </div>
                   <CopyAction
                     onCopy={() => {
-                      onCopyFromFederada('sepultamentoCremacao');
-                      onCopyFromFederada('cemiterio');
+                      if (federada.sepultamentoCremacao) onCopyFromFederada('sepultamentoCremacao');
+                      if (federada.cemiterio) onCopyFromFederada('cemiterio');
                     }}
-                    title="Copiar dados do sepultamento"
+                    title="Copiar destinação do corpo e nome do cemitério da base federada"
                   />
                 </div>
               }
@@ -1515,6 +1813,124 @@ export const ComparativePanel: React.FC<ComparativePanelProps> = ({
                     }}
                     title="Copiar qualificação do declarante"
                   />
+                </div>
+              }
+            />
+
+            {/* ROW: Biometria & Assinatura Digital do Declarante */}
+            <CompareRow
+              label="Biometria & Assinatura do Declarante (Webcam / Touch Pad)"
+              field="biometriaDeclarante"
+              status={
+                biometriaRecord
+                  ? { status: 'OK', label: 'SELADA & AUTENTICADA (SHA-256)', color: 'bg-emerald-950 text-emerald-300 border-emerald-800' }
+                  : { status: 'PENDING', label: 'NÃO COLETADA (OPCIONAL/RECOMENDADO)', color: 'bg-amber-950/60 text-amber-300 border-amber-800' }
+              }
+              divergenceNote={
+                biometriaRecord ? (
+                  <div className="flex items-center space-x-2 text-[10px] text-emerald-400 font-mono mt-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span className="truncate">
+                      Hash SHA-256 de Custódia: <strong className="text-emerald-300">{biometriaRecord.sha256Hash}</strong>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-1.5 text-[10px] text-amber-300/90 mt-1">
+                    <Fingerprint className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span>
+                      Conformidade Cartorial: Provimento CNJ nº 149/2023 recomenda coleta dactiloscópica ou assinatura eletrônica em atos notariais e registrais.
+                    </span>
+                  </div>
+                )
+              }
+              col1={
+                <div className="space-y-2">
+                  {biometriaRecord ? (
+                    <div className="bg-slate-950 border border-emerald-800/60 rounded-lg p-2.5 space-y-2 shadow-inner">
+                      <div className="flex items-start space-x-3">
+                        <div className="relative group shrink-0">
+                          <img
+                            src={biometriaRecord.imageBase64}
+                            alt="Biometria capturada"
+                            className="w-16 h-16 object-contain rounded border border-emerald-600/50 bg-slate-900 shadow"
+                          />
+                          <div className="absolute inset-0 bg-slate-950/70 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity rounded cursor-pointer"
+                               onClick={onOpenBiometricModal}>
+                            <Eye className="w-4 h-4 text-emerald-300" />
+                          </div>
+                        </div>
+                        <div className="flex-1 min-w-0 text-[11px] space-y-1">
+                          <div className="flex items-center space-x-1.5">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-700 font-bold text-[9px]">
+                              {biometriaRecord.typeLabel}
+                            </span>
+                            <span className="text-emerald-400 font-medium">Autenticada</span>
+                          </div>
+                          <div className="text-slate-300 truncate">
+                            Declarante: <strong className="text-white uppercase">{biometriaRecord.declaranteNome}</strong>
+                          </div>
+                          <div className="text-slate-400 text-[10px] truncate">
+                            Data/Hora: {biometriaRecord.timestamp}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-1.5 border-t border-slate-800/80 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={onOpenBiometricModal}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 hover:text-cyan-200 rounded text-[10px] font-semibold flex items-center space-x-1 transition-colors border border-slate-700"
+                        >
+                          <Camera className="w-3 h-3 text-cyan-400" />
+                          <span>Recapturar / Inspecionar</span>
+                        </button>
+                        <span className="text-[9px] text-slate-500 font-mono">
+                          Mat: {biometriaRecord.operadorMatricula}
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 space-y-2">
+                      <div className="flex items-center space-x-2 text-slate-400 text-xs">
+                        <Fingerprint className="w-4 h-4 text-amber-400" />
+                        <span className="text-[11px] text-slate-300">Nenhum registro biométrico vinculado a este ato</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={onOpenBiometricModal}
+                        className="w-full py-1.5 px-3 bg-gradient-to-r from-cyan-600 to-indigo-600 hover:from-cyan-500 hover:to-indigo-500 text-white rounded text-xs font-bold flex items-center justify-center space-x-2 transition-all shadow-md active:scale-[0.99] cursor-pointer"
+                      >
+                        <Camera className="w-3.5 h-3.5 text-white" />
+                        <span>Capturar Biometria ou Assinatura via Câmera</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              }
+              col2={
+                <div className="text-xs space-y-1 text-slate-300">
+                  <div className="flex items-center space-x-1.5">
+                    <Scan className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="font-medium text-slate-200">Dactiloscopia na D.O.</span>
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    {ocr.nomeDeclarante ? (
+                      <span>Assinatura física identificada na via amarela da D.O. correspondente ao declarante.</span>
+                    ) : (
+                      <span className="italic text-slate-500">Aguardando leitura de documento físico...</span>
+                    )}
+                  </div>
+                </div>
+              }
+              col3={
+                <div className="text-xs space-y-1 text-cyan-300">
+                  <div className="flex items-center space-x-1.5">
+                    <Database className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="font-semibold text-cyan-200">Base Integrada ONR / CRC</span>
+                  </div>
+                  <div className="text-[11px] text-cyan-400/90">
+                    <span>Validação contra padrões biométricos do Sistema Nacional de Informações de Registro Civil (SIRC).</span>
+                  </div>
                 </div>
               }
             />

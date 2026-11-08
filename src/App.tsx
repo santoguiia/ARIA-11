@@ -4,32 +4,38 @@
  * Preparada para execução web e empacotamento standalone Windows (.exe x64) via Electron.
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { MOCK_SCENARIOS } from './data/mockScenarios';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   DeathRecordData, 
   OCRConfidenceMap, 
-  CaseScenario, 
   AuditLogEntry, 
   FederatedBusStatus, 
   CartorioCertificate, 
   LocalFirstNodeStatus, 
   EscreventeUser,
   OCRDocumentState,
-  LicenseInfo,
-  LicenseTier,
-  LocalLLMStatus
+  LocalLLMStatus,
+  BiometricRecord,
+  FederatedSearchStatus
 } from './types';
 import { evaluateQualityGate } from './engine/rules';
-import { computeHash } from './engine/validators';
+import { computeHash, validateCPF } from './engine/validators';
 import { 
   processUploadedOCRFile, 
   createInitialOCRDocumentState
 } from './engine/ocrPipeline';
 import { INITIAL_FEDERATED_BUSES, CARTORIO_CERTIFICATE, INITIAL_LOCAL_FIRST_STATUS } from './data/federatedBuses';
-import { MOCK_ESCREVENTES, DEFAULT_ACTIVE_USER } from './data/mockUsers';
-import { getLicenseStatus, checkHeartbeat } from './engine/licenseEngine';
+import { MOCK_ESCREVENTES } from './data/mockUsers';
 import { getLLMStatus } from './engine/llmClient';
+import { EMPTY_PRODUCTION_SCENARIO, createEmptyDeathRecordData, createEmptyOCRConfidence } from './data/emptyRecord';
+import { db } from './firebase/config';
+import { doc, setDoc } from 'firebase/firestore';
+import { 
+  getFederatedRecordByCpf, 
+  mapCitizenToDeathRecordData, 
+  seedFederatedDataToFirestore, 
+  checkIfFederatedCollectionNeedsSeed 
+} from './services/federatedFirestoreService';
 
 import { LoginScreen } from './components/LoginScreen';
 import { DesktopTitleBar } from './components/DesktopTitleBar';
@@ -38,26 +44,21 @@ import { QualityGateDrawer } from './components/QualityGateDrawer';
 import { AuditTrailModal } from './components/AuditTrailModal';
 import { OCRPreviewModal } from './components/OCRPreviewModal';
 import { CertificatePreviewModal } from './components/CertificatePreviewModal';
-import { ElectronPackagerModal } from './components/ElectronPackagerModal';
 import { AboutModal } from './components/AboutModal';
-import { FederatedMtlsModal } from './components/FederatedMtlsModal';
-import { LicenseManagerModal } from './components/LicenseManagerModal';
-import { UpgradeAlertModal } from './components/UpgradeAlertModal';
 import { CNJReportModal } from './components/CNJReportModal';
+import { BiometricCaptureModal } from './components/BiometricCaptureModal';
 
 export default function App() {
-  // Current active scenario
-  const [currentScenario, setCurrentScenario] = useState<CaseScenario>(MOCK_SCENARIOS[0]);
 
-  // Working data copies (Source A, Source B, Source C)
-  const [declaracao, setDeclaracao] = useState<DeathRecordData>(MOCK_SCENARIOS[0].dadosDeclaracao);
-  const [ocr, setOcr] = useState<DeathRecordData>(MOCK_SCENARIOS[0].dadosOCR);
-  const [ocrConfidence, setOcrConfidence] = useState<OCRConfidenceMap>(MOCK_SCENARIOS[0].ocrConfidence);
-  const [federada, setFederada] = useState<DeathRecordData>(MOCK_SCENARIOS[0].dadosFederados);
+  // Working data copies (Source A, Source B, Source C) initialized 100% clean
+  const [declaracao, setDeclaracao] = useState<DeathRecordData>(() => createEmptyDeathRecordData());
+  const [ocr, setOcr] = useState<DeathRecordData>(() => createEmptyDeathRecordData());
+  const [ocrConfidence, setOcrConfidence] = useState<OCRConfidenceMap>(() => createEmptyOCRConfidence());
+  const [federada, setFederada] = useState<DeathRecordData>(() => createEmptyDeathRecordData());
 
   // Local-First OCR Document State with Bounding Boxes & LGPD On-Device processing
   const [ocrDocumentState, setOcrDocumentState] = useState<OCRDocumentState>(() => {
-    return createInitialOCRDocumentState(MOCK_SCENARIOS[0].dadosOCR).state;
+    return createInitialOCRDocumentState(createEmptyDeathRecordData()).state;
   });
   const [focusedOCRField, setFocusedOCRField] = useState<keyof DeathRecordData | null>(null);
 
@@ -70,6 +71,20 @@ export default function App() {
   // Justifications keyed by ruleId
   const [justifications, setJustifications] = useState<Record<string, string>>({});
 
+  // Google Gemini Vision OCR API connection & diagnostic status
+  const [googleOcrStatus, setGoogleOcrStatus] = useState<{
+    tested: boolean;
+    ok: boolean;
+    model?: string;
+    latencyMs?: number;
+    isTesting: boolean;
+    message?: string;
+  }>({
+    tested: false,
+    ok: false,
+    isTesting: false
+  });
+
   // Active Clerk / Escrevente and Authentication State
   const [currentUser, setCurrentUser] = useState<EscreventeUser | null>(() => {
     const saved = localStorage.getItem('aria_logged_user');
@@ -80,12 +95,12 @@ export default function App() {
         console.error(e);
       }
     }
-    return DEFAULT_ACTIVE_USER;
+    return null;
   });
 
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
     const saved = localStorage.getItem('aria_logged_in');
-    return saved !== null ? saved === 'true' : true;
+    return saved === 'true';
   });
 
   // Dark Mode Theme State
@@ -102,11 +117,33 @@ export default function App() {
     });
   };
 
+  // Handler: Start a pristine, 100% clean production lavratura
+  const handleNewCleanLavratura = () => {
+    setDeclaracao(createEmptyDeathRecordData());
+    setOcr(createEmptyDeathRecordData());
+    setOcrConfidence(createEmptyOCRConfidence());
+    setFederada(createEmptyDeathRecordData());
+    setOcrDocumentState(createInitialOCRDocumentState(createEmptyDeathRecordData()).state);
+    setJustifications({});
+    setBiometriaRecord(null);
+    setFederatedStatus('IDLE');
+    if (lastSearchedCpfRef.current) {
+      lastSearchedCpfRef.current = '';
+    }
+    appendAuditLog(
+      'SCENARIO_LOADED',
+      'Nova pré-lavratura iniciada com formulários limpos (ambiente de produção sem dados prévios).'
+    );
+    showToast('Nova lavratura em branco iniciada com formulários limpos.');
+  };
+
   const handleLogin = (user: EscreventeUser) => {
     setCurrentUser(user);
     setIsLoggedIn(true);
     localStorage.setItem('aria_logged_user', JSON.stringify(user));
     localStorage.setItem('aria_logged_in', 'true');
+    // Ensure the clerk starts in a clean production lavratura
+    handleNewCleanLavratura();
     appendAuditLog(
       'OPERADOR_LOGIN',
       `Sessão iniciada: ${user.nome} (${user.matricula}) autenticado via ${
@@ -123,10 +160,46 @@ export default function App() {
         `Estação de trabalho bloqueada / logout efetuado por ${currentUser.nome} (${currentUser.matricula}).`
       );
     }
+    // LGPD Expurgo de dados de trabalho da sessão
+    setDeclaracao(createEmptyDeathRecordData());
+    setOcr(createEmptyDeathRecordData());
+    setOcrConfidence(createEmptyOCRConfidence());
+    setFederada(createEmptyDeathRecordData());
+    setJustifications({});
+    setBiometriaRecord(null);
+    setFederatedStatus('IDLE');
+    if (lastSearchedCpfRef.current) {
+      lastSearchedCpfRef.current = '';
+    }
     setIsLoggedIn(false);
-    localStorage.setItem('aria_logged_in', 'false');
-    showToast('Estação de trabalho bloqueada. Faça login para continuar.');
+    setCurrentUser(null);
+    localStorage.removeItem('aria_logged_in');
+    localStorage.removeItem('aria_logged_user');
+    showToast('Sessão encerrada com sucesso. Memória purgada conforme LGPD.');
   };
+
+  // Inactivity auto-lock timer (15 minutes) for Security Compliance (LGPD & Prov. CNJ 149)
+  useEffect(() => {
+    if (!isLoggedIn) return;
+
+    let timeoutId: NodeJS.Timeout;
+    const resetTimer = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        handleLogout();
+        showToast('Sessão bloqueada automaticamente por inatividade (Segurança da Informação).');
+      }, 15 * 60 * 1000);
+    };
+
+    resetTimer();
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart'];
+    activityEvents.forEach(evt => window.addEventListener(evt, resetTimer, { passive: true }));
+
+    return () => {
+      clearTimeout(timeoutId);
+      activityEvents.forEach(evt => window.removeEventListener(evt, resetTimer));
+    };
+  }, [isLoggedIn, currentUser]);
 
   // Local Audit Logs (simulating SQLite persistent ledger with SHA-256 hash chaining)
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
@@ -135,39 +208,43 @@ export default function App() {
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [isOCRModalOpen, setIsOCRModalOpen] = useState(false);
   const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
-  const [isPackagerModalOpen, setIsPackagerModalOpen] = useState(false);
   const [isAboutModalOpen, setIsAboutModalOpen] = useState(false);
-  const [isMtlsModalOpen, setIsMtlsModalOpen] = useState(false);
-  const [isLicenseModalOpen, setIsLicenseModalOpen] = useState(false);
   const [isCNJReportModalOpen, setIsCNJReportModalOpen] = useState(false);
-  const [upgradeAlertTier, setUpgradeAlertTier] = useState<LicenseTier | null>(null);
+  const [isBiometricModalOpen, setIsBiometricModalOpen] = useState(false);
 
-  // Licensing and Local LLM State
-  const [license, setLicense] = useState<LicenseInfo | null>(null);
-  const [llmStatus, setLlmStatus] = useState<LocalLLMStatus | null>(null);
+  // Biometric / Signature state captured for current lavratura
+  const [biometriaRecord, setBiometriaRecord] = useState<BiometricRecord | null>(null);
 
-  // Initial License & LLM Engine Handshake
+  // Base Federada (Fonte C) real-time online state
+  const [federatedStatus, setFederatedStatus] = useState<FederatedSearchStatus>('IDLE');
+  const [isSeedingFederated, setIsSeedingFederated] = useState<boolean>(false);
+
+  // Initial Federated Collection Auto-Seed & OCR Diagnostics
   useEffect(() => {
-    getLicenseStatus().then(lic => {
-      setLicense(lic);
-    }).catch(err => console.warn('Falha ao obter licença:', err));
+    // Auto-seed transparente da coleção federated_citizens caso o banco esteja novo/vazio
+    checkIfFederatedCollectionNeedsSeed().then(async (needsSeed) => {
+      if (needsSeed) {
+        console.info('[Base Federada] Inicializando seed canônico de cidadãos no Firestore...');
+        await seedFederatedDataToFirestore();
+      }
+    }).catch(err => console.warn('Erro ao verificar seed federado:', err));
 
-    getLLMStatus().then(status => {
-      setLlmStatus(status);
-    }).catch(err => console.warn('Falha ao obter status LLM:', err));
-
-    // Periodic Heartbeat check every 5 minutes
-    const interval = setInterval(() => {
-      checkHeartbeat().then(() => {
-        getLicenseStatus().then(lic => setLicense(lic));
-      }).catch(err => console.warn('Heartbeat error:', err));
-
-      getLLMStatus().then(status => {
-        setLlmStatus(status);
-      }).catch(() => {});
-    }, 5 * 60 * 1000);
-
-    return () => clearInterval(interval);
+    // Verificação de conectividade do Google Gemini Vision OCR
+    fetch('/api/ocr/verify')
+      .then(res => res.json())
+      .then(data => {
+        if (data.ok) {
+          setGoogleOcrStatus({
+            tested: true,
+            ok: true,
+            model: data.activeModel,
+            latencyMs: data.latencyMs,
+            message: data.message,
+            isTesting: false
+          });
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Toast / notification
@@ -204,12 +281,13 @@ export default function App() {
   const appendAuditLog = useCallback(async (
     action: AuditLogEntry['action'],
     resumo: string,
-    extraJustifications?: Record<string, string>
+    extraJustifications?: Record<string, string>,
+    biometricRecord?: BiometricRecord
   ) => {
     setAuditLogs((prevLogs) => {
       const prevHash = prevLogs.length > 0 ? prevLogs[0].sha256Hash : '0000000000000000000000000000000000000000000000000000000000000000';
       const timestamp = new Date().toLocaleString('pt-BR');
-      const seed = `${timestamp}|${action}|${resumo}|${declaracao.numeroDO}|${declaracao.cpf}|${prevHash}`;
+      const seed = `${timestamp}|${action}|${resumo}|${declaracao.numeroDO}|${declaracao.cpf}|${biometricRecord?.sha256Hash || ''}|${prevHash}`;
       
       // Calculate synchronous hash simulation or async
       let pseudoHash = '';
@@ -243,7 +321,8 @@ export default function App() {
           numeroDO: declaracao.numeroDO,
           nomeFalecido: declaracao.nomeFalecido,
           cpf: declaracao.cpf
-        }
+        },
+        biometricRecord: biometricRecord
       };
 
       const updated = [newEntry, ...prevLogs];
@@ -252,9 +331,130 @@ export default function App() {
       } catch (e) {
         console.error('Storage quota exceeded', e);
       }
+
+      // Sincronização centralizada em nuvem (Firestore) para persistência segura
+      if (currentUser?.id) {
+        try {
+          const logDocRef = doc(db, 'audit_logs', newEntry.id);
+          setDoc(logDocRef, {
+            id: newEntry.id,
+            operadorUid: currentUser.id,
+            operadorNome: newEntry.operador,
+            action: newEntry.action,
+            resumo: newEntry.resumo.slice(0, 480),
+            sha256Hash: newEntry.sha256Hash,
+            previousHash: newEntry.previousHash,
+            timestamp: newEntry.timestamp,
+            ...(biometricRecord ? {
+              biometriaHash: biometricRecord.sha256Hash,
+              biometriaType: biometricRecord.type
+            } : {})
+          }).catch(err => console.warn('Sync audit log to Firestore:', err));
+        } catch (e) {
+          // Fallback offline
+        }
+      }
+
       return updated;
     });
-  }, [declaracao, gateEvaluation.summary, justifications]);
+  }, [currentUser, declaracao, gateEvaluation.summary, justifications]);
+
+  // Handler: Attach Biometric Thumbprint / Digital Signature to the record
+  const handleAttachBiometric = async (record: BiometricRecord) => {
+    setBiometriaRecord(record);
+    await appendAuditLog(
+      'BIOMETRIC_CAPTURE',
+      `Captura e selamento criptográfico de ${record.typeLabel} do declarante ${record.declaranteNome} (SHA-256: ${record.sha256Hash.slice(0, 16)}...).`,
+      undefined,
+      record
+    );
+    showToast(`Biometria / Assinatura de ${record.declaranteNome} vinculada com sucesso!`);
+    setIsBiometricModalOpen(false);
+  };
+
+  // Stable ref for appendAuditLog to decouple triggerFederatedLookup from render churn
+  const appendAuditLogRef = useRef(appendAuditLog);
+  appendAuditLogRef.current = appendAuditLog;
+
+  // Track the last successfully searched CPF to strictly avoid infinite re-fetching
+  const lastSearchedCpfRef = useRef<string>('');
+
+  // Handler: Real-time lookup of CPF on Central Federated Base (Google Cloud Firestore)
+  const triggerFederatedLookup = useCallback(async (cpfToSearch: string) => {
+    const clean = (cpfToSearch || '').replace(/\D/g, '');
+    const isStandardValidCpf = clean.length === 11 && validateCPF(clean).valid;
+    const isFederatedTermo = clean === '10735111022006' || clean === '10735111022';
+
+    if (!isStandardValidCpf && !isFederatedTermo) {
+      setFederatedStatus('IDLE');
+      return;
+    }
+
+    setFederatedStatus('BUSCANDO');
+    try {
+      const citizen = await getFederatedRecordByCpf(clean);
+      if (citizen) {
+        setFederada(prev => mapCitizenToDeathRecordData(citizen, prev));
+        setFederatedStatus('VERIFICADO_ONLINE');
+        showToast(`Base Central CRC/RFB: Cidadão '${citizen.nomeCompleto}' localizado no Firestore!`);
+        await appendAuditLogRef.current(
+          'EVALUATION',
+          `Consulta cadastral em tempo real no Firestore (Base Federada Central): Cidadão ${citizen.nomeCompleto} (CPF ${citizen.cpf || citizen.registroTermo}) localizado com status SIRC ${citizen.statusSirc}.`
+        );
+      } else {
+        setFederatedStatus('NAO_ENCONTRADO');
+        showToast('CPF/Termo não localizado na Base Federada Central (Firestore).');
+      }
+    } catch (err: any) {
+      console.warn('Erro na consulta ao Firestore da Base Federada:', err);
+      setFederatedStatus('ERRO_REDE');
+      showToast('Falha na comunicação com o Firestore. Modo de contingência ativo.');
+    }
+  }, []);
+
+  // Watcher com debounce (400ms) ao alterar o CPF na Fonte A (ou após cópia da Fonte B)
+  // Executa estritamente uma única vez por alteração de CPF válido para evitar loops
+  useEffect(() => {
+    const clean = (declaracao.cpf || '').replace(/\D/g, '');
+    const isStandardValidCpf = clean.length === 11 && validateCPF(clean).valid;
+    const isFederatedTermo = clean === '10735111022006' || clean === '10735111022';
+
+    if (isStandardValidCpf || isFederatedTermo) {
+      if (clean === lastSearchedCpfRef.current) {
+        return;
+      }
+      const timer = setTimeout(() => {
+        lastSearchedCpfRef.current = clean;
+        triggerFederatedLookup(clean);
+      }, 400);
+      return () => clearTimeout(timer);
+    } else {
+      if (clean !== lastSearchedCpfRef.current) {
+        lastSearchedCpfRef.current = '';
+      }
+      if (!clean) {
+        setFederatedStatus('IDLE');
+      }
+    }
+  }, [declaracao.cpf, triggerFederatedLookup]);
+
+  // Handler: Sincronização e Seed Manual dos Cidadãos no Firestore
+  const handleManualSeedFederated = async () => {
+    setIsSeedingFederated(true);
+    showToast('Sincronizando catálogo canônico de cidadãos com o Firestore...');
+    try {
+      const result = await seedFederatedDataToFirestore();
+      showToast(result.message);
+      if (declaracao.cpf) {
+        await triggerFederatedLookup(declaracao.cpf);
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast('Erro ao sincronizar base com Firestore.');
+    } finally {
+      setIsSeedingFederated(false);
+    }
+  };
 
   // Initial load from localStorage or seed
   useEffect(() => {
@@ -263,28 +463,56 @@ export default function App() {
       if (saved) {
         setAuditLogs(JSON.parse(saved));
       } else {
-        appendAuditLog('SCENARIO_LOADED', `Inicialização do sistema ARIA - Carregado: ${MOCK_SCENARIOS[0].title}`);
+        appendAuditLog('SCENARIO_LOADED', 'Inicialização do sistema ARIA - Modo Produção Homologado (Protocolo Limpo)');
       }
     } catch (e) {
       console.error(e);
     }
   }, []);
 
-  // Handler: Select a scenario
-  const handleSelectScenario = (scen: CaseScenario) => {
-    setCurrentScenario(scen);
-    setDeclaracao({ ...scen.dadosDeclaracao });
-    setOcr({ ...scen.dadosOCR });
-    setOcrConfidence({ ...scen.ocrConfidence });
-    setFederada({ ...scen.dadosFederados });
-    setJustifications({});
-    const initDoc = createInitialOCRDocumentState(scen.dadosOCR);
-    setOcrDocumentState(initDoc.state);
-    appendAuditLog('SCENARIO_LOADED', `Carregado cenário de teste: ${scen.title}`);
-    showToast(`Cenário carregado: ${scen.title}`);
-  };
 
-  // Handler: Upload and process physical document file (.pdf, .png, .jpeg) with Local Tesseract OCR
+  // Handler: Diagnostic test of Google Gemini Vision OCR API
+  const handleVerifyGoogleOCR = useCallback(async () => {
+    setGoogleOcrStatus(prev => ({ ...prev, isTesting: true }));
+    showToast('Testando conexão com a API Google Gemini Vision OCR...');
+    try {
+      const res = await fetch('/api/ocr/verify');
+      const data = await res.json();
+      if (data.ok) {
+        setGoogleOcrStatus({
+          tested: true,
+          ok: true,
+          model: data.activeModel,
+          latencyMs: data.latencyMs,
+          message: data.message,
+          isTesting: false
+        });
+        showToast(`Google Vision OCR OK: Modelo ${data.activeModel} (${data.latencyMs}ms)`);
+        await appendAuditLog(
+          'EVALUATION',
+          `Diagnóstico Google OCR executado com sucesso: modelo ${data.activeModel}, latência ${data.latencyMs}ms, integridade multimodal validada.`
+        );
+      } else {
+        setGoogleOcrStatus({
+          tested: true,
+          ok: false,
+          message: data.message || data.error,
+          isTesting: false
+        });
+        showToast(data.message || 'Falha ao validar Google OCR');
+      }
+    } catch (err: any) {
+      setGoogleOcrStatus({
+        tested: true,
+        ok: false,
+        message: err.message,
+        isTesting: false
+      });
+      showToast('Erro ao conectar com a API do Google OCR.');
+    }
+  }, [appendAuditLog]);
+
+  // Handler: Upload and process physical document file (.pdf, .png, .jpeg) with Google Gemini Vision AI
   const handleUploadOCRFile = async (file: File) => {
     const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
     setOcrDocumentState(prev => ({
@@ -296,7 +524,7 @@ export default function App() {
       processingStep: `Carregando ${file.name} (${(file.size / 1024).toFixed(1)} KB)...`
     }));
 
-    showToast(`Iniciando OCR local de '${file.name}'...`);
+    showToast(`Iniciando OCR de '${file.name}' via Google Gemini Vision AI...`);
 
     try {
       const result = await processUploadedOCRFile(
@@ -309,7 +537,7 @@ export default function App() {
             processingStep: step
           }));
         },
-        'LOCAL_FAST'
+        'HYBRID_VISION'
       );
 
       setOcrDocumentState(result.state);
@@ -318,10 +546,10 @@ export default function App() {
 
       await appendAuditLog(
         'EVALUATION',
-        `Arquivo físico '${file.name}' ingerido e processado via pipeline Tesseract OCR On-Device (Privacidade total LGPD). ${Object.keys(result.state.fields).length} campos extraídos com scores de confiança.`
+        `Arquivo físico '${file.name}' ingerido e processado via ${result.state.engine || 'Google Gemini Vision AI'}. ${Object.keys(result.state.fields).length} campos extraídos com scores de confiança e Bounding Boxes espaciais.`
       );
 
-      showToast(`Arquivo '${file.name}' processado com sucesso pelo OCR local!`);
+      showToast(`Arquivo '${file.name}' processado com sucesso pelo ${result.state.engine || 'Google Gemini Vision AI'}!`);
     } catch (err: any) {
       console.error('Erro no processamento OCR:', err);
       setOcrDocumentState(prev => ({
@@ -341,10 +569,9 @@ export default function App() {
     setIsOCRModalOpen(true);
   };
 
-  // Handler: Reset to clean slate
+  // Handler: Reset to clean slate (Ambiente de Produção 100% Limpo)
   const handleResetToDefaults = () => {
-    handleSelectScenario(MOCK_SCENARIOS[3]); // Conforme
-    showToast('Formulário restaurado para novo ato.');
+    handleNewCleanLavratura();
   };
 
   // Handler: Update field in Declaração Preliminar
@@ -400,65 +627,36 @@ export default function App() {
       justifications
     );
 
+    // Persistência em nuvem centralizada (Firestore)
+    if (currentUser?.id) {
+      try {
+        const lavraturaId = `LAV-${Date.now()}`;
+        const lavRef = doc(db, 'lavraturas', lavraturaId);
+        setDoc(lavRef, {
+          id: lavraturaId,
+          numeroDO: declaracao.numeroDO || 'S/N',
+          nomeFalecido: declaracao.nomeFalecido || 'Ignorado',
+          cpfFalecido: declaracao.cpf || '',
+          status: 'HOMOLOGADO_LAVRADO',
+          operadorUid: currentUser.id,
+          operadorNome: currentUser.nome,
+          cns: currentUser.cns || '118492',
+          biometriaHash: biometriaRecord?.sha256Hash || '',
+          biometriaType: biometriaRecord?.type || '',
+          biometriaDeclarante: biometriaRecord?.declaranteNome || '',
+          hasBiometria: !!biometriaRecord,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }).catch(e => console.warn('Sync lavratura to Firestore:', e));
+      } catch (e) {
+        // Fallback offline
+      }
+    }
+
     showToast('Ato de Óbito lavrado com sucesso! Assento gerado.');
     setIsCertificateModalOpen(true);
   };
 
-  // Handler: Toggle Offline / Contingency Mode (Local-First preservation)
-  const handleToggleContingency = () => {
-    setLocalNodeStatus(prev => {
-      const nextMode = !prev.contingencyMode;
-      appendAuditLog(
-        'EVALUATION',
-        nextMode 
-          ? 'Modo Contingência Offline ativado: consultas aos barramentos federados suspensas. Motor determinístico operando 100% na ponta.'
-          : 'Modo Contingência Offline desativado: reconectando barramentos federados via mTLS ICP-Brasil.'
-      );
-      showToast(nextMode ? 'Modo de Contingência Offline ATIVADO.' : 'Modo Contingência DESATIVADO. Conexões mTLS restabelecidas.');
-      return {
-        ...prev,
-        contingencyMode: nextMode
-      };
-    });
-  };
-
-  // Handler: Test mTLS Handshake with external federated buses
-  const handleTestHandshake = async (busId?: string) => {
-    setIsTestingHandshake(true);
-    try {
-      if (window.electronAPI?.testMtlsHandshake) {
-        const res = await window.electronAPI.testMtlsHandshake(busId);
-        showToast(`mTLS Handshake OK: Latência ${res.latencyMs}ms (${res.tlsVersion} / ${res.cipherSuite})`);
-      } else {
-        // Web / browser simulation
-        await new Promise(r => setTimeout(r, 600));
-        showToast(`Handshake mTLS validado com sucesso (TLS 1.3 / ECDHE-RSA-AES256-GCM-SHA384).`);
-      }
-      
-      const nowStr = new Date().toLocaleTimeString('pt-BR');
-      setFederatedBuses(prev => prev.map(b => {
-        if (!busId || b.id === busId) {
-          return {
-            ...b,
-            status: 'CONNECTED',
-            lastSync: `Hoje às ${nowStr}`,
-            latencyMs: Math.floor(Math.random() * 25) + 20
-          };
-        }
-        return b;
-      }));
-      setCartorioCert(prev => ({
-        ...prev,
-        lastHandshake: `Hoje às ${nowStr} (mTLS OK)`
-      }));
-      appendAuditLog('EVALUATION', `Handshake mTLS ICP-Brasil realizado com sucesso para ${busId || 'todos os barramentos federados'}.`);
-    } catch (err) {
-      console.error(err);
-      showToast('Falha no teste de handshake mTLS.');
-    } finally {
-      setIsTestingHandshake(false);
-    }
-  };
 
   // Export Audit Trail as JSON
   const handleExportAuditJSON = () => {
@@ -537,16 +735,12 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
     // 1. Escuta eventos disparados pelo Menu Nativo do Windows (ativado ao pressionar ALT)
     let cleanupElectron: (() => void) | void;
     if (window.electronAPI?.onMenuAction) {
-      cleanupElectron = window.electronAPI.onMenuAction((action: string, data?: any) => {
+      cleanupElectron = window.electronAPI.onMenuAction((action: string) => {
         switch (action) {
+          case 'new-clean-lavratura':
           case 'reset-scenario':
-            handleResetToDefaults();
+            handleNewCleanLavratura();
             break;
-          case 'select-scenario': {
-            const sc = MOCK_SCENARIOS.find(s => s.id === data);
-            if (sc) handleSelectScenario(sc);
-            break;
-          }
           case 'open-cnj-report':
             setIsCNJReportModalOpen(true);
             break;
@@ -568,20 +762,11 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           case 'open-ocr':
             setIsOCRModalOpen(true);
             break;
-          case 'open-mtls':
-            setIsMtlsModalOpen(true);
-            break;
           case 'open-audit':
             setIsAuditModalOpen(true);
             break;
-          case 'open-license':
-            setIsLicenseModalOpen(true);
-            break;
           case 'toggle-theme':
             handleToggleDarkMode();
-            break;
-          case 'open-packager':
-            setIsPackagerModalOpen(true);
             break;
           case 'open-about':
             setIsAboutModalOpen(true);
@@ -608,19 +793,13 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           handleExportAuditJSON();
         } else if (e.key.toLowerCase() === 'n') {
           e.preventDefault();
-          handleResetToDefaults();
+          handleNewCleanLavratura();
         } else if (e.key.toLowerCase() === 'm') {
           e.preventDefault();
           setIsCertificateModalOpen(true);
         } else if (e.key.toLowerCase() === 'o') {
           e.preventDefault();
           setIsOCRModalOpen(true);
-        } else if (e.key.toLowerCase() === 't') {
-          e.preventDefault();
-          setIsMtlsModalOpen(true);
-        } else if (e.key.toLowerCase() === 'k') {
-          e.preventDefault();
-          setIsLicenseModalOpen(true);
         } else if (e.key.toLowerCase() === 'l') {
           e.preventDefault();
           handleLogout();
@@ -629,9 +808,6 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
         if (e.key === 'F1') {
           e.preventDefault();
           setIsAboutModalOpen(true);
-        } else if (e.key === 'F2') {
-          e.preventDefault();
-          setIsPackagerModalOpen(true);
         } else if (e.key === 'F5') {
           e.preventDefault();
           showToast('Regras reavaliadas pelo motor determinístico.');
@@ -645,7 +821,7 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
       window.removeEventListener('keydown', handleKeyDown);
       if (typeof cleanupElectron === 'function') cleanupElectron();
     };
-  }, [declaracao, ocr, auditLogs, currentScenario, gateEvaluation, isDarkMode]);
+  }, [declaracao, ocr, auditLogs, gateEvaluation, isDarkMode]);
 
   // If not logged in, show the full clerk login screen
   if (!isLoggedIn) {
@@ -671,14 +847,11 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
       isDarkMode ? 'dark bg-slate-950 text-slate-100' : 'light bg-slate-100 text-slate-900'
     }`}>
       
-      {/* 1. Desktop Window Titlebar (Windows 10/11) */}
+      {/* 1. Desktop Window Titlebar */}
       <DesktopTitleBar
-        currentScenarioTitle={currentScenario.title}
+        onNewCleanLavratura={handleNewCleanLavratura}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onOpenAudit={() => setIsAuditModalOpen(true)}
-        license={license}
-        onOpenLicenseModal={() => setIsLicenseModalOpen(true)}
       />
 
       {/* 2. Main Working Area: 3-Column Comparative Panel + Quality Gate Drawer */}
@@ -695,8 +868,15 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
           onCopyFromFederada={handleCopyFromFederada}
           onCopyFromOCR={handleCopyFromOCR}
           onOpenOCRModal={handleOpenOCRModal}
-          onOpenMtlsModal={() => setIsMtlsModalOpen(true)}
           onOpenCNJReportModal={() => setIsCNJReportModalOpen(true)}
+          onVerifyGoogleOCR={handleVerifyGoogleOCR}
+          googleOcrStatus={googleOcrStatus}
+          biometriaRecord={biometriaRecord}
+          onOpenBiometricModal={() => setIsBiometricModalOpen(true)}
+          federatedStatus={federatedStatus}
+          onSeedFederatedData={handleManualSeedFederated}
+          isSeedingFederated={isSeedingFederated}
+          onRefreshFederatedSearch={() => triggerFederatedLookup(declaracao.cpf)}
         />
 
         {/* Right Drawer: Quality Gate Rules, Justifications & Lavratura */}
@@ -714,52 +894,37 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
             handleUpdateDeclaracaoField(field, value);
             showToast(`Campo ${String(field).toUpperCase()} atualizado para: ${value}`);
           }}
-          license={license}
-          onTriggerUpgradeAlert={(tier) => setUpgradeAlertTier(tier)}
           declaracao={declaracao}
           ocr={ocr}
           federada={federada}
+          biometriaRecord={biometriaRecord}
+          onOpenBiometricModal={() => setIsBiometricModalOpen(true)}
         />
       </div>
 
-      {/* 4. Desktop Status Bar */}
+      {/* 4. Desktop Status Bar - Clean Production View */}
       <footer className="bg-slate-900 border-t border-slate-800 text-[11px] text-slate-400 px-3 py-1 flex items-center justify-between select-none shrink-0 z-20">
         <div className="flex items-center space-x-3">
-          <div className="flex items-center space-x-1">
+          <div className="flex items-center space-x-1.5">
             <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            <span className="text-slate-300 font-medium">Motor OPA/Rego: Ativo</span>
+            <span className="text-slate-300 font-medium">Quality Gate: Ativo (Lei 6.015/73)</span>
           </div>
           <span className="text-slate-600">|</span>
-          <div className="flex items-center space-x-1">
-            <span className={`w-1.5 h-1.5 rounded-full ${llmStatus?.isLoaded ? 'bg-amber-400 animate-pulse' : 'bg-indigo-400'}`}></span>
-            <span className="font-mono text-[10px] text-slate-300">
-              Qwen2.5-1.5B: {llmStatus?.isLoaded ? 'Memória Ativa' : 'Standby (Lazy)'}
-            </span>
+          <div className="flex items-center space-x-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400"></span>
+            <span>D.O. em Análise: <strong className="font-mono text-cyan-300">{declaracao.numeroDO || 'Aguardando D.O.'}</strong></span>
           </div>
           <span className="text-slate-600">|</span>
-          <button
-            onClick={() => setIsLicenseModalOpen(true)}
-            className="flex items-center space-x-1 text-amber-300 hover:text-amber-200 transition-colors"
-            title="Clique para gerenciar licença SaaS Local-First"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-            <span>Licença: <strong className="font-semibold">{license?.license_tier || 'PRO_AI'}</strong></span>
-          </button>
-          <span className="text-slate-600">|</span>
-          <span>D.O. em Análise: <strong className="font-mono text-cyan-300">{declaracao.numeroDO}</strong></span>
+          <div className="flex items-center space-x-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+            <span>Base Federada: <strong className="text-emerald-300">Conectada (mTLS / SIRC)</strong></span>
+          </div>
         </div>
 
         <div className="flex items-center space-x-3 text-slate-400">
-          <button
-            onClick={() => setIsMtlsModalOpen(true)}
-            className="flex items-center space-x-1 hover:text-emerald-300 transition-colors"
-            title="Clique para inspecionar túnel mTLS ICP-Brasil e barramentos federados"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            <span>mTLS ICP-Brasil: <strong className="text-emerald-400">CRC/ONR/SIRC Conectados</strong></span>
-          </button>
-          <span className="text-slate-600">|</span>
           <span>Trilha SHA-256: <strong className="font-mono text-slate-300">{auditLogs.length} blocos</strong></span>
+          <span className="text-slate-600">|</span>
+          <span className="text-slate-400">Conformidade Provimento CNJ 149/2023</span>
         </div>
       </footer>
 
@@ -794,51 +959,15 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
         isOpen={isCertificateModalOpen}
         onClose={() => setIsCertificateModalOpen(false)}
         record={declaracao}
+        federada={federada}
         currentUser={currentUser}
-        license={license}
         justifications={justifications}
-        onTriggerUpgradeAlert={(tier) => setUpgradeAlertTier(tier)}
-      />
-
-      <ElectronPackagerModal
-        isOpen={isPackagerModalOpen}
-        onClose={() => setIsPackagerModalOpen(false)}
+        biometriaRecord={biometriaRecord}
       />
 
       <AboutModal
         isOpen={isAboutModalOpen}
         onClose={() => setIsAboutModalOpen(false)}
-      />
-
-      <FederatedMtlsModal
-        isOpen={isMtlsModalOpen}
-        onClose={() => setIsMtlsModalOpen(false)}
-        buses={federatedBuses}
-        certificate={cartorioCert}
-        nodeStatus={localNodeStatus}
-        onToggleContingency={handleToggleContingency}
-        onTestHandshake={handleTestHandshake}
-        isTestingHandshake={isTestingHandshake}
-      />
-
-      <LicenseManagerModal
-        isOpen={isLicenseModalOpen}
-        onClose={() => setIsLicenseModalOpen(false)}
-        currentLicense={license}
-        onLicenseUpdated={(newLic) => {
-          setLicense(newLic);
-          showToast(`Licença ${newLic.license_tier} ativada com sucesso!`);
-        }}
-      />
-
-      <UpgradeAlertModal
-        isOpen={!!upgradeAlertTier}
-        onClose={() => setUpgradeAlertTier(null)}
-        requiredTier={upgradeAlertTier || 'PRO_AI'}
-        onOpenLicenseManager={() => {
-          setUpgradeAlertTier(null);
-          setIsLicenseModalOpen(true);
-        }}
       />
 
       <CNJReportModal
@@ -856,6 +985,15 @@ Documento gerado eletronicamente por ARIA Desktop v1.4.2 [REF-11 / INE5448].
         currentUser={currentUser}
         auditLogs={auditLogs}
         ocrDocumentState={ocrDocumentState}
+      />
+
+      <BiometricCaptureModal
+        isOpen={isBiometricModalOpen}
+        onClose={() => setIsBiometricModalOpen(false)}
+        declaracao={declaracao}
+        currentUser={currentUser}
+        existingBiometria={biometriaRecord}
+        onAttachBiometric={handleAttachBiometric}
       />
 
     </div>

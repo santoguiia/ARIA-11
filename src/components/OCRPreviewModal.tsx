@@ -116,8 +116,8 @@ export const OCRPreviewModal: React.FC<OCRPreviewModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 20, 250));
-  const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 20, 60));
+  const handleZoomIn = () => setZoomLevel((prev) => Math.min(prev + 20, 300));
+  const handleZoomOut = () => setZoomLevel((prev) => Math.max(prev - 20, 50));
   const handleResetZoom = () => setZoomLevel(100);
 
   // Cálculo dinâmico de coordenadas relativas normalizadas (left, top, width, height)
@@ -218,8 +218,15 @@ export const OCRPreviewModal: React.FC<OCRPreviewModalProps> = ({
                 <span>Arquivo: <strong className="text-slate-200">{documentState.fileName}</strong></span>
                 <span>•</span>
                 <span>Resolução Nativa: <strong className="text-slate-200 font-mono">{imageDimensions.naturalWidth} × {imageDimensions.naturalHeight} px</strong></span>
-                <span>•</span>
                 <span className="text-cyan-400 font-mono text-[11px]">{fieldsList.length} entidades mapeadas</span>
+                {documentState.engine && (
+                  <>
+                    <span>•</span>
+                    <span className="text-emerald-300 font-mono text-[11px] bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-700/60">
+                      {documentState.engine}
+                    </span>
+                  </>
+                )}
               </p>
             </div>
           </div>
@@ -310,14 +317,16 @@ export const OCRPreviewModal: React.FC<OCRPreviewModalProps> = ({
           {/* Left: Document Viewport com pan e scroll smooth */}
           <div 
             ref={documentContainerRef}
-            className="flex-1 overflow-auto bg-slate-950 p-4 sm:p-6 flex justify-center items-start relative select-none scroll-smooth"
+            className="flex-1 overflow-auto bg-slate-950 p-4 sm:p-6 flex relative select-none scroll-smooth min-w-0 min-h-0"
           >
             {/* 1. WRAPPER RELATIVO ESTRITO ENCAPSULANDO A IMAGEM E O OVERLAY */}
             <div 
-              className="relative inline-block transition-transform duration-150 origin-top shadow-2xl rounded-sm border border-slate-700 select-none overflow-hidden"
+              className="relative m-auto shrink-0 shadow-2xl rounded-sm border border-slate-700 select-none overflow-hidden transition-all duration-150 origin-top"
               style={{
                 width: `${(zoomLevel / 100) * 820}px`,
-                maxWidth: 'none'
+                minWidth: `${(zoomLevel / 100) * 820}px`,
+                maxWidth: 'none',
+                flexShrink: 0
               }}
             >
               {/* Imagem Original Carregada - onLoad captura dimensões nativas */}

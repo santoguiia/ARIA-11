@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Perfil funcional do escrevente / operador
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) 
+        && isValidId(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() <= 150
+        && request.resource.data.matricula is string
+        && request.resource.data.matricula.size() <= 30;
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && request.resource.data.uid == userId
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() <= 150;
+    }
+
+    // Protocolos de lavratura
+    match /lavraturas/{lavraturaId} {
+      allow get: if isSignedIn() && resource.data.operadorUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.operadorUid == request.auth.uid;
+      allow create: if isSignedIn() 
+        && isValidId(lavraturaId)
+        && request.resource.data.operadorUid == request.auth.uid
+        && request.resource.data.status is string
+        && request.resource.data.status.size() <= 50;
+      allow update: if isSignedIn()
+        && isValidId(lavraturaId)
+        && resource.data.operadorUid == request.auth.uid
+        && request.resource.data.operadorUid == request.auth.uid
+        && request.resource.data.status is string
+        && request.resource.data.status.size() <= 50;
+    }
+
+    // Trilha de auditoria criptográfica (Imutável: somente create e read)
+    match /audit_logs/{logId} {
+      allow get: if isSignedIn() && resource.data.operadorUid == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.operadorUid == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(logId)
+        && request.resource.data.operadorUid == request.auth.uid
+        && request.resource.data.sha256Hash is string
+        && request.resource.data.sha256Hash.size() <= 100
+        && request.resource.data.resumo is string
+        && request.resource.data.resumo.size() <= 500;
+      allow update, delete: if false;
+    }
+
+    // Base Federada Centralizada de Cidadãos (CRC / RFB / SIRC)
+    match /federated_citizens/{cleanCpf} {
+      allow get: if true;
+      allow list: if true;
+      allow create, update: if isValidId(cleanCpf)
+        && request.resource.data.cleanCpf is string
+        && request.resource.data.cleanCpf.size() <= 20
+        && request.resource.data.nomeCompleto is string
+        && request.resource.data.nomeCompleto.size() <= 200;
+      allow delete: if false;
+    }
+  }
+}

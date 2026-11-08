@@ -19,33 +19,46 @@ import {
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas-pro';
-import { DeathRecordData, EscreventeUser, LicenseInfo, LicenseTier } from '../types';
+import { DeathRecordData, EscreventeUser, LicenseInfo, LicenseTier, BiometricRecord } from '../types';
 import { requestLLMMinuta } from '../engine/llmClient';
 
 interface CertificatePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   record: DeathRecordData;
+  federada?: DeathRecordData;
   currentUser?: EscreventeUser | null;
   license?: LicenseInfo | null;
   justifications?: Record<string, string>;
   onTriggerUpgradeAlert?: (requiredTier: LicenseTier) => void;
+  biometriaRecord?: BiometricRecord | null;
 }
 
 export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = ({
   isOpen,
   onClose,
   record,
+  federada,
   currentUser,
   license,
   justifications,
-  onTriggerUpgradeAlert
+  onTriggerUpgradeAlert,
+  biometriaRecord
 }) => {
   const [activeTab, setActiveTab] = useState<'CERTIFICATE' | 'LLM_MINUTA'>('CERTIFICATE');
   const [copied, setCopied] = useState(false);
   const [copiedMinuta, setCopiedMinuta] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exportSuccessMsg, setExportSuccessMsg] = useState<string | null>(null);
+
+  // Fonte de dados para a certidão / PDF
+  const hasFederadaData = Boolean(federada && (federada.cpf || federada.nomeFalecido));
+  const [selectedSource, setSelectedSource] = useState<'DECLARACAO' | 'FEDERADA'>(() => {
+    if (!record.cpf && hasFederadaData) return 'FEDERADA';
+    return 'DECLARACAO';
+  });
+
+  const activeRecord = (selectedSource === 'FEDERADA' && hasFederadaData && federada) ? federada : record;
 
   // Local LLM Minuta State
   const [minutaText, setMinutaText] = useState<string>('');
@@ -55,11 +68,6 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
   if (!isOpen) return null;
 
   const handleGenerateMinutaWithAI = async () => {
-    if (license && !license.canUseLocalLLM) {
-      onTriggerUpgradeAlert?.('PRO_AI');
-      return;
-    }
-
     setIsGeneratingMinuta(true);
     try {
       const res = await requestLLMMinuta({
@@ -92,9 +100,8 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
 
   if (!isOpen) return null;
 
-  // Generate synthetic official civil registration matricula (32 digits)
-  // [6 dígitos cartório] [2 acervo] [2 atribuição 55=RCPN] [4 ano] [1 tipo livro 4=óbito] [5 número livro] [3 folha] [7 termo] [2 DV]
-  const matricula = `118492 01 55 2024 4 00042 118 0004921-88`;
+  // Generate synthetic official civil registration matricula (32 digits) or use federated matricula / termo
+  const matricula = activeRecord.matricula || activeRecord.numeroDO || record.matricula || `118492 01 55 2024 4 00042 118 0004921-88`;
   const seloFiscalizacao = `TJSC-OBIT-2024-49102-X9`;
   const hashAssinatura = `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`;
 
@@ -145,7 +152,7 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
         Math.min(pdfImageHeight, pageHeight - (margin * 2))
       );
 
-      const cleanName = (record.nomeFalecido || 'Falecido')
+      const cleanName = (activeRecord.nomeFalecido || record.nomeFalecido || 'Falecido')
         .replace(/[^a-zA-Z0-9]/g, '_')
         .substring(0, 32);
       const filename = `Minuta_Certidao_Obito_${cleanName}.pdf`;
@@ -364,6 +371,37 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
               </button>
             </div>
 
+            {hasFederadaData && activeTab === 'CERTIFICATE' && (
+              <div className="flex items-center space-x-1.5 bg-slate-800/90 border border-slate-700/80 px-2 py-1 rounded-lg text-xs">
+                <span className="text-[11px] text-slate-400 font-medium hidden sm:inline">Origem no PDF:</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSource('DECLARACAO')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-colors cursor-pointer ${
+                    selectedSource === 'DECLARACAO'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                  title="Utilizar dados da Declaração Preliminar (Fonte A)"
+                >
+                  Fonte A (Declaração)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSource('FEDERADA')}
+                  className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center space-x-1 transition-colors cursor-pointer ${
+                    selectedSource === 'FEDERADA'
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : 'text-cyan-400 hover:text-cyan-300'
+                  }`}
+                  title="Utilizar dados da Base Federada SIRC/CRC (Fonte C)"
+                >
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-300 animate-pulse"></span>
+                  <span>Fonte C (Base Federada SIRC)</span>
+                </button>
+              </div>
+            )}
+
             {activeTab === 'LLM_MINUTA' && (
               <span className="text-[11px] text-slate-400 font-mono hidden sm:inline">
                 node-llama-cpp • 2048ctx • 100% Offline
@@ -495,10 +533,10 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                     REGISTRO CIVIL DAS PESSOAS NATURAIS
                   </h4>
                   <p className="text-[11px] text-slate-700 font-sans font-medium mt-0.5">
-                    Cartório do 1º Ofício de Registro Civil e Tabelionato de Notas
+                    {activeRecord.cartorioNome || (activeRecord.cartorioEndereco ? 'Registro Civil das Pessoas Naturais' : 'Cartório do 1º Ofício de Registro Civil e Tabelionato de Notas')}
                   </p>
                   <p className="text-[10px] text-slate-600 font-sans italic">
-                    Comarca da Capital • Estado de Santa Catarina • CNS: 118492
+                    {activeRecord.cartorioEndereco || `Comarca da Capital • Estado de Santa Catarina • CNS: ${activeRecord.cnsCartorio || '118492'}`}
                   </p>
 
                   {/* Ornate Title Banner */}
@@ -540,34 +578,42 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                       NOME DO FALECIDO(A):
                     </span>
                     <span className="text-base sm:text-lg font-black uppercase text-slate-950 font-serif tracking-wide block mt-0.5">
-                      {record.nomeFalecido}
+                      {activeRecord.nomeFalecido}
                     </span>
+                    {(activeRecord.idadeFalecido || activeRecord.naturalidadeMunicipio || activeRecord.ocupacao) && (
+                      <div className="text-[10px] text-amber-950/80 font-sans mt-1 flex flex-wrap items-center justify-center gap-x-3">
+                        {activeRecord.idadeFalecido ? <span>Idade: <strong>{activeRecord.idadeFalecido} anos</strong></span> : null}
+                        {activeRecord.dataNascimento ? <span>Nascimento: <strong>{activeRecord.dataNascimento}</strong></span> : null}
+                        {activeRecord.naturalidadeMunicipio ? <span>Naturalidade: <strong>{activeRecord.naturalidadeMunicipio} - {activeRecord.naturalidadeUf}</strong></span> : null}
+                        {activeRecord.ocupacao ? <span>Profissão: <strong>{activeRecord.ocupacao}</strong></span> : null}
+                      </div>
+                    )}
                   </div>
 
                   {/* Section 1: Documentos & Qualificação Pessoal */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 p-2.5 bg-white/70 border border-amber-200 rounded">
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">CADASTRO DE PESSOA FÍSICA (CPF):</span>
-                      <span className="font-mono font-bold text-slate-900 text-xs">{record.cpf}</span>
+                      <span className="font-mono font-bold text-slate-900 text-xs">{activeRecord.cpf || 'NÃO INFORMADO'}</span>
                     </div>
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">DOCUMENTO DE IDENTIDADE (RG):</span>
                       <span className="font-mono font-semibold text-slate-900 text-xs">
-                        {record.rg} ({record.rgOrgaoEmissor || 'SSP/SC'})
+                        {activeRecord.rg || 'CONFORME REGISTRO'} ({activeRecord.rgOrgaoEmissor || 'SSP'})
                       </span>
                     </div>
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">SEXO E COR/RAÇA:</span>
                       <span className="font-semibold text-slate-900">
-                        {record.sexo === 'M' ? 'MASCULINO' : 'FEMININO'} • {record.corRaca}
+                        {activeRecord.sexo === 'M' ? 'MASCULINO' : 'FEMININO'} • {activeRecord.corRaca || 'PARDA'}
                       </span>
                     </div>
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">ESTADO CIVIL & CÔNJUGE:</span>
-                      <span className="font-bold text-slate-950">{record.estadoCivil}</span>
-                      {record.nomeConjuge ? (
+                      <span className="font-bold text-slate-950">{activeRecord.estadoCivil}</span>
+                      {activeRecord.nomeConjuge ? (
                         <span className="block text-[11px] text-slate-700 font-medium">
-                          Cônjuge: <strong className="uppercase">{record.nomeConjuge}</strong>
+                          Cônjuge: <strong className="uppercase">{activeRecord.nomeConjuge}</strong>
                         </span>
                       ) : null}
                     </div>
@@ -581,11 +627,11 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-[10px] text-slate-500 font-medium block">MÃE:</span>
-                        <span className="font-bold uppercase text-slate-950">{record.nomeMae || 'NÃO DECLARADA'}</span>
+                        <span className="font-bold uppercase text-slate-950">{activeRecord.nomeMae || 'NÃO DECLARADA'}</span>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-500 font-medium block">PAI:</span>
-                        <span className="font-bold uppercase text-slate-950">{record.nomePai || 'NÃO DECLARADO'}</span>
+                        <span className="font-bold uppercase text-slate-950">{activeRecord.nomePai || 'NÃO DECLARADO'}</span>
                       </div>
                     </div>
                   </div>
@@ -596,13 +642,13 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                       <div>
                         <span className="text-[10px] font-bold uppercase text-slate-600 block">DATA E HORA DO FALECIMENTO:</span>
                         <span className="font-bold text-slate-900 text-xs">
-                          {record.dataObito} às {record.horaObito} horas
+                          {activeRecord.dataObito} {activeRecord.horaObito ? `às ${activeRecord.horaObito} horas` : ''}
                         </span>
                       </div>
                       <div>
                         <span className="text-[10px] font-bold uppercase text-slate-600 block">LOCAL DO FALECIMENTO:</span>
                         <span className="text-slate-900 font-medium">
-                          {record.localObito}, {record.municipioObito} - {record.ufObito}
+                          {activeRecord.localObito}, {activeRecord.municipioObito} - {activeRecord.ufObito}
                         </span>
                       </div>
                     </div>
@@ -610,17 +656,17 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                     <div className="border-t border-amber-100 pt-1.5">
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">CAUSA DA MORTE (ATESTADO MÉDICO):</span>
                       <span className="font-serif italic font-semibold text-slate-950 block">
-                        {record.causaMortis} (CID-10: {record.cid10})
+                        {activeRecord.causaMortis || 'Atestada em prontuário hospitalar (sem necropsia)'} {activeRecord.cid10 ? `(CID-10: ${activeRecord.cid10})` : ''}
                       </span>
                       <span className="text-[11px] text-slate-700 block mt-0.5">
-                        Médico Atestante: <strong>{record.nomeMedico}</strong> • CRM: {record.crmMedico}/{record.ufCrm}
+                        Médico Atestante: <strong>{activeRecord.nomeMedico}</strong> • CRM: {activeRecord.crmMedico}/{activeRecord.ufCrm}
                       </span>
                     </div>
 
                     <div className="border-t border-amber-100 pt-1.5">
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">SEPULTAMENTO OU CREMAÇÃO:</span>
                       <span className="font-medium text-slate-900">
-                        {record.sepultamentoCremacao} realizado no <strong>{record.cemiterio}</strong>
+                        {activeRecord.sepultamentoCremacao || 'Conforme registros municipais'} {activeRecord.cemiterio ? `no ${activeRecord.cemiterio}` : ''}
                       </span>
                     </div>
                   </div>
@@ -630,22 +676,27 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">BENS E HERDEIROS:</span>
                       <span className="text-slate-800">
-                        Deixou Bens: <strong>{record.deixouBens}</strong>
+                        Deixou Bens: <strong>{activeRecord.deixouBens}</strong>
                       </span>
                       <span className="block text-[11px] text-slate-700">
-                        Filhos: {record.deixouFilhos} {record.nomesFilhos ? `(${record.nomesFilhos})` : ''}
+                        Filhos: {activeRecord.deixouFilhos} {activeRecord.nomesFilhos ? `(${activeRecord.nomesFilhos})` : ''}
                       </span>
+                      {activeRecord.anotacoesAverbacoes ? (
+                        <span className="block text-[10px] text-slate-600 italic mt-0.5">
+                          Anotações: {activeRecord.anotacoesAverbacoes}
+                        </span>
+                      ) : null}
                     </div>
                     <div>
                       <span className="text-[10px] font-bold uppercase text-slate-600 block">DECLARANTE DO ÓBITO:</span>
-                      <span className="font-bold text-slate-900 uppercase block">{record.nomeDeclarante}</span>
-                      <span className="text-[11px] text-slate-600 italic block">Qualificação: {record.qualificacaoDeclarante}</span>
+                      <span className="font-bold text-slate-900 uppercase block">{activeRecord.nomeDeclarante || 'DECLARANTE QUALIFICADO'}</span>
+                      <span className="text-[11px] text-slate-600 italic block">Qualificação: {activeRecord.qualificacaoDeclarante || 'Conforme D.O.'}</span>
                     </div>
                   </div>
 
                   {/* Section 5: Fé Pública & Dispositivos Legais */}
                   <div className="border-t-2 border-amber-900/30 pt-3 text-[11px] text-slate-700 font-serif text-justify leading-relaxed">
-                    Certifico e dou fé que o presente assento foi lavrado a requerimento do declarante sobredito, em estrita conformidade com o <strong>Art. 80 da Lei Federal nº 6.015/1973</strong> e com o <strong>Provimento CNJ nº 149/2023</strong>, à vista da Declaração de Óbito nº <strong>{record.numeroDO}</strong> emitida pelo Ministério da Saúde. O referido é verdade e dou fé.
+                    Certifico e dou fé que o presente assento foi lavrado a requerimento do declarante sobredito, em estrita conformidade com o <strong>Art. 80 da Lei Federal nº 6.015/1973</strong> e com o <strong>Provimento CNJ nº 149/2023</strong>, à vista da Declaração de Óbito nº <strong>{activeRecord.numeroDO || activeRecord.registroTermo}</strong> emitida pelo Ministério da Saúde. O referido é verdade e dou fé.
                   </div>
 
                   {/* Section 6: Selos de Autenticidade & Chaves Criptográficas */}
@@ -686,21 +737,33 @@ export const CertificatePreviewModal: React.FC<CertificatePreviewModalProps> = (
                   </div>
 
                   {/* Signatures Block */}
-                  <div className="mt-8 pt-4 border-t border-slate-400 grid grid-cols-2 gap-6 text-center text-xs">
+                  <div className="mt-8 pt-4 border-t border-slate-400 grid grid-cols-2 gap-6 text-center text-xs items-end">
                     <div>
+                      {biometriaRecord ? (
+                        <div className="mb-2">
+                          <img
+                            src={biometriaRecord.imageBase64}
+                            alt="Biometria / Assinatura do Declarante"
+                            className="h-14 mx-auto object-contain border border-slate-300 p-0.5 rounded bg-white shadow-xs"
+                          />
+                          <div className="text-[9px] text-slate-500 font-mono mt-0.5">
+                            {biometriaRecord.typeLabel} • SHA-256: {biometriaRecord.sha256Hash.substring(0, 16)}...
+                          </div>
+                        </div>
+                      ) : null}
                       <div className="border-b border-slate-700 pb-1 font-semibold text-slate-950 uppercase tracking-wide">
-                        {record.nomeDeclarante}
+                        {activeRecord.nomeDeclarante || 'Declarante'}
                       </div>
                       <span className="text-[10px] text-slate-600 block mt-0.5">
-                        Declarante Qualificado
+                        {biometriaRecord ? 'Declarante Qualificado (Identificação Biometrizada)' : 'Declarante Qualificado'}
                       </span>
                     </div>
                     <div>
                       <div className="border-b border-slate-700 pb-1 font-semibold text-slate-950 tracking-wide">
-                        {currentUser ? `${currentUser.nome} - ${currentUser.cargoLabel}` : 'Guilherme Santos - Escrevente Autorizado'}
+                        {activeRecord.escreventeRegistro ? `${activeRecord.escreventeRegistro} - ${activeRecord.cargoOficial || 'Oficial Substituto'}` : (currentUser ? `${currentUser.nome} - ${currentUser.cargoLabel}` : 'Guilherme Santos - Escrevente Autorizado')}
                       </div>
                       <span className="text-[10px] text-slate-600 block mt-0.5">
-                        Oficial / Escrevente Designado (Mat. nº {currentUser?.matricula || '8419'})
+                        {activeRecord.oficialRegistro ? `Oficial Titular: ${activeRecord.oficialRegistro}` : `Oficial / Escrevente Designado (Mat. nº ${currentUser?.matricula || '8419'})`}
                       </span>
                     </div>
                   </div>

@@ -1,0 +1,101 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Perfil funcional do escrevente autorizado",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "nome": { "type": "string", "maxLength": 150 },
+        "matricula": { "type": "string", "maxLength": 30 },
+        "cargo": { "type": "string", "maxLength": 80 },
+        "cns": { "type": "string", "maxLength": 10 },
+        "cartorio": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "format": "email", "maxLength": 150 },
+        "termoLgpdAceito": { "type": "boolean" },
+        "dataAceiteTermo": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["uid", "nome", "matricula", "termoLgpdAceito"]
+    },
+    "Lavratura": {
+      "title": "Lavratura",
+      "description": "Registro de pré-lavratura de óbito em produção",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "numeroDO": { "type": "string", "maxLength": 50 },
+        "nomeFalecido": { "type": "string", "maxLength": 200 },
+        "cpfFalecido": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "maxLength": 50 },
+        "operadorUid": { "type": "string", "maxLength": 128 },
+        "operadorNome": { "type": "string", "maxLength": 150 },
+        "cns": { "type": "string", "maxLength": 10 },
+        "biometriaHash": { "type": "string", "maxLength": 100 },
+        "biometriaType": { "type": "string", "maxLength": 50 },
+        "biometriaDeclarante": { "type": "string", "maxLength": 150 },
+        "hasBiometria": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "operadorUid", "status"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Registro de auditoria com hash SHA-256",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 100 },
+        "operadorUid": { "type": "string", "maxLength": 128 },
+        "operadorNome": { "type": "string", "maxLength": 150 },
+        "action": { "type": "string", "maxLength": 50 },
+        "resumo": { "type": "string", "maxLength": 500 },
+        "sha256Hash": { "type": "string", "maxLength": 100 },
+        "previousHash": { "type": "string", "maxLength": 100 },
+        "biometriaHash": { "type": "string", "maxLength": 100 },
+        "biometriaType": { "type": "string", "maxLength": 50 },
+        "timestamp": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "operadorUid", "action", "resumo", "sha256Hash", "timestamp"]
+    },
+    "FederatedCitizen": {
+      "title": "FederatedCitizen",
+      "description": "Registro cadastral de cidadão na Base Federada Central (CRC / RFB / SIRC)",
+      "type": "object",
+      "properties": {
+        "cleanCpf": { "type": "string", "maxLength": 11 },
+        "cpf": { "type": "string", "maxLength": 20 },
+        "nomeCompleto": { "type": "string", "maxLength": 200 },
+        "rg": { "type": "string", "maxLength": 30 },
+        "orgaoEmissor": { "type": "string", "maxLength": 20 },
+        "sexo": { "type": "string", "maxLength": 1 },
+        "corRaca": { "type": "string", "maxLength": 30 },
+        "dataNascimento": { "type": "string", "maxLength": 20 },
+        "estadoCivil": { "type": "string", "maxLength": 40 },
+        "numeroCertidaoCasamento": { "type": "string", "maxLength": 60 },
+        "numeroCertidaoNascimento": { "type": "string", "maxLength": 60 },
+        "statusSirc": { "type": "string", "maxLength": 30 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["cleanCpf", "cpf", "nomeCompleto", "statusSirc"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Perfis funcionais dos escreventes da serventia"
+    },
+    "/lavraturas/{lavraturaId}": {
+      "schema": "Lavratura",
+      "description": "Protocolos de pré-lavratura criados pelos escreventes"
+    },
+    "/audit_logs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Trilha de auditoria criptográfica dos atos e acessos"
+    },
+    "/federated_citizens/{cleanCpf}": {
+      "schema": "FederatedCitizen",
+      "description": "Registros de cidadãos da Base Federada Centralizada"
+    }
+  }
+}

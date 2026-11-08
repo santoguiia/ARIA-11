@@ -1,6 +1,6 @@
 {
-  "summary": "Implementation plan for ARIA Desktop improvements including CNJ Certified PDF Report Export, On-Device Local OCR optimization, and Legal Dark Theme (Slate/Cyan).",
-  "updatedAt": "2026-10-13T18:21:35.300955069Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Plano de limpeza e consolidação para a versão definitiva de produção real do ARIA Desktop: remoção de simulações de licença, empacotador, diagnósticos fictícios e cenários de teste, mantendo 100% o fluxo autêntico de pré-lavratura notarial, Quality Gate CNJ nº 149/2023, auditoria SHA-256 e biometria.",
+  "updatedAt":  "2026-11-08T00:14:16.113749102Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

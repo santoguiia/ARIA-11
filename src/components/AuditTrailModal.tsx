@@ -11,7 +11,9 @@ import {
   Clock, 
   UserCheck, 
   Search,
-  Filter
+  Filter,
+  Fingerprint,
+  Camera
 } from 'lucide-react';
 import { AuditLogEntry } from '../types';
 
@@ -135,9 +137,11 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                         ? 'bg-rose-950 text-rose-300 border border-rose-800'
                         : entry.action === 'JUSTIFICATION_SUBMITTED'
                         ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                        : entry.action === 'BIOMETRIC_CAPTURE' || entry.action === 'SIGNATURE_ATTACHED'
+                        ? 'bg-indigo-950 text-indigo-300 border border-indigo-700'
                         : 'bg-slate-800 text-slate-300 border border-slate-700'
                     }`}>
-                      {entry.action}
+                      {entry.action === 'BIOMETRIC_CAPTURE' ? 'BIOMETRIA CAPTURADA' : entry.action}
                     </span>
                     <span className="font-semibold text-slate-200">{entry.resumo}</span>
                   </div>
@@ -153,6 +157,37 @@ export const AuditTrailModal: React.FC<AuditTrailModalProps> = ({
                     </span>
                   </div>
                 </div>
+
+                {/* Biometric Record Details & Thumbnail if present */}
+                {entry.biometricRecord && (
+                  <div className="mt-2.5 p-2.5 bg-slate-900 border border-indigo-900/60 rounded-lg flex items-start space-x-3">
+                    <div className="relative shrink-0">
+                      <img
+                        src={entry.biometricRecord.imageBase64}
+                        alt="Amostra biométrica"
+                        className="w-14 h-14 object-contain rounded border border-indigo-500/40 bg-slate-950 shadow"
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0 text-[11px] space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-700 font-bold text-[9px] flex items-center space-x-1">
+                          <Fingerprint className="w-3 h-3" />
+                          <span>{entry.biometricRecord.typeLabel}</span>
+                        </span>
+                        <span className="text-emerald-400 text-[10px] flex items-center space-x-1 font-semibold">
+                          <ShieldCheck className="w-3 h-3" />
+                          <span>Provimento CNJ nº 149/2023</span>
+                        </span>
+                      </div>
+                      <div className="text-slate-300 truncate">
+                        Declarante: <strong className="text-white uppercase">{entry.biometricRecord.declaranteNome}</strong>
+                      </div>
+                      <div className="text-[10px] text-indigo-300 font-mono truncate" title={entry.biometricRecord.sha256Hash}>
+                        SHA-256 Selado: <span className="text-white">{entry.biometricRecord.sha256Hash}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Justifications if any */}
                 {entry.justifications && Object.keys(entry.justifications).length > 0 && (

@@ -491,6 +491,15 @@ export const QUALITY_GATE_RULES: QualityGateRule[] = [
     legalReference: 'Manual de Instruções para Preenchimento da Declaração de Óbito (Ministério da Saúde / SVS)',
     description: 'Exige conferência manual do operador se campos críticos da DO digitalizada apresentarem score de confiança de OCR inferior a 75%.',
     evaluate: (decl, ocr, ocrConf) => {
+      const hasAnyOCR = Object.values(ocr).some(v => typeof v === 'string' && v.trim().length > 0);
+      if (!hasAnyOCR) {
+        return {
+          passed: true,
+          message: 'Nenhum documento digitalizado para leitura óptica neste protocolo (entrada manual de balcão ou aguardando upload da D.O.).',
+          sourcesCompared: []
+        };
+      }
+
       const camposCriticos: Array<{ key: keyof DeathRecordData; label: string; minConf: number }> = [
         { key: 'numeroDO', label: 'Número da Declaração de Óbito (DO)', minConf: 80 },
         { key: 'causaMortis', label: 'Causa Mortis / CID-10', minConf: 75 },

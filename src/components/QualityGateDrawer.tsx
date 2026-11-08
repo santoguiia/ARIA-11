@@ -18,9 +18,11 @@ import {
   ExternalLink,
   Cpu,
   RefreshCw,
-  Scale
+  Scale,
+  Fingerprint,
+  Camera
 } from 'lucide-react';
-import { RuleEvaluationResult, RuleSeverity, DeathRecordData, LicenseInfo, LicenseTier } from '../types';
+import { RuleEvaluationResult, RuleSeverity, DeathRecordData, LicenseInfo, LicenseTier, BiometricRecord } from '../types';
 import { DiffHighlight } from '../engine/diffHighlight';
 import { requestLLMJustification } from '../engine/llmClient';
 
@@ -40,6 +42,8 @@ interface QualityGateDrawerProps {
   declaracao?: DeathRecordData;
   ocr?: DeathRecordData;
   federada?: DeathRecordData;
+  biometriaRecord?: BiometricRecord | null;
+  onOpenBiometricModal?: () => void;
 }
 
 export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
@@ -57,7 +61,9 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
   onTriggerUpgradeAlert,
   declaracao,
   ocr,
-  federada
+  federada,
+  biometriaRecord,
+  onOpenBiometricModal
 }) => {
   const [filter, setFilter] = useState<'TODAS' | 'FALHAS' | 'BLOQUEIO' | 'ALERTA'>('TODAS');
   const [expandedRule, setExpandedRule] = useState<string | null>(null);
@@ -65,12 +71,6 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
   const [llmMetaMap, setLlmMetaMap] = useState<Record<string, { source: string; durationMs: number }>>({});
 
   const handleRequestAIJustification = async (item: RuleEvaluationResult) => {
-    // Verificação de Feature Flag da Licença
-    if (license && !license.canUseLocalLLM) {
-      onTriggerUpgradeAlert?.('PRO_AI');
-      return;
-    }
-
     setGeneratingJustificationMap((prev) => ({ ...prev, [item.ruleId]: true }));
 
     try {
@@ -428,6 +428,53 @@ export const QualityGateDrawer: React.FC<QualityGateDrawerProps> = ({
 
       {/* Bottom Action Footer: Lavratura Button & Audit Link */}
       <div className="p-3 border-t border-slate-800 bg-slate-950/90 space-y-2">
+        {/* Biometria & Assinatura Card */}
+        {biometriaRecord ? (
+          <div className="p-2 rounded-lg bg-emerald-950/40 border border-emerald-800/60 flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-2 min-w-0">
+              <div className="w-7 h-7 rounded bg-emerald-900/60 border border-emerald-700/60 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-emerald-200 text-[11px] truncate flex items-center space-x-1">
+                  <span>{biometriaRecord.typeLabel}</span>
+                  <span className="text-[9px] px-1 bg-emerald-900 text-emerald-300 rounded font-mono">SHA-256</span>
+                </div>
+                <div className="text-[10px] text-emerald-400/80 font-mono truncate max-w-[170px]" title={biometriaRecord.sha256Hash}>
+                  {biometriaRecord.sha256Hash.substring(0, 16)}...
+                </div>
+              </div>
+            </div>
+            {onOpenBiometricModal && (
+              <button
+                type="button"
+                onClick={onOpenBiometricModal}
+                className="px-2 py-1 bg-slate-900 hover:bg-slate-800 text-emerald-300 hover:text-emerald-200 rounded border border-emerald-700/50 text-[10px] font-medium transition-colors cursor-pointer shrink-0"
+              >
+                Inspecionar
+              </button>
+            )}
+          </div>
+        ) : onOpenBiometricModal ? (
+          <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-2">
+              <Fingerprint className="w-4 h-4 text-amber-400 shrink-0" />
+              <div>
+                <div className="font-medium text-slate-200 text-[11px]">Biometria / Assinatura</div>
+                <div className="text-[10px] text-slate-400">Pendente de captura no guichê</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onOpenBiometricModal}
+              className="px-2 py-1 bg-gradient-to-r from-cyan-700 to-indigo-700 hover:from-cyan-600 hover:to-indigo-600 text-white rounded text-[10px] font-semibold flex items-center space-x-1 shadow transition-all cursor-pointer shrink-0"
+            >
+              <Camera className="w-3 h-3" />
+              <span>Capturar</span>
+            </button>
+          </div>
+        ) : null}
+
         {onOpenCNJReportModal && (
           <button
             onClick={onOpenCNJReportModal}

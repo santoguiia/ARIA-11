@@ -275,13 +275,13 @@ export const CNJReportModal: React.FC<CNJReportModalProps> = ({
           )}
 
           {/* Document Viewer Body */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950/60 flex justify-center">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-950/80">
             
-            {/* The Printable A4 Sheet */}
+            {/* The Printable A4 Sheet - Estende continuamente cobrindo todo o laudo */}
             <div 
               id="printable-cnj-report"
-              className="bg-white text-slate-900 rounded-sm shadow-xl p-8 max-w-[210mm] w-full text-[11px] leading-relaxed border border-slate-300 select-text font-serif"
-              style={{ minHeight: '297mm' }}
+              className="bg-white text-slate-900 rounded-sm shadow-2xl p-8 sm:p-10 max-w-[210mm] w-full text-[11px] leading-relaxed border border-slate-300 select-text font-serif mx-auto my-2"
+              style={{ minHeight: '297mm', height: 'auto' }}
             >
               {/* Official Seal & Header */}
               <div className="border-b-2 border-slate-900 pb-4 mb-4 text-center">

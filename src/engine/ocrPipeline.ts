@@ -13,6 +13,7 @@ import {
   extractEntitiesWithAnchorOCR, 
   OCRWord 
 } from './anchorOcrEngine';
+import { createEmptyOCRConfidence } from '../data/emptyRecord';
 
 export type OCREngineMode = 'LOCAL_FAST' | 'HYBRID_VISION';
 
@@ -412,41 +413,12 @@ export function parseStructuredDeathRecord(
   fieldExtractions: Partial<Record<keyof DeathRecordData, OCRFieldExtraction>>;
 } {
   const parsed: DeathRecordData = { ...currentRecord };
-  const confidenceMap: OCRConfidenceMap = {
-    numeroDO: 95,
-    nomeFalecido: 94,
-    cpf: 96,
-    rg: 90,
-    rgOrgaoEmissor: 88,
-    dataNascimento: 92,
-    sexo: 99,
-    corRaca: 91,
-    estadoCivil: 89,
-    dataCasamento: 85,
-    nomeConjuge: 87,
-    nomeMae: 93,
-    nomePai: 90,
-    dataObito: 97,
-    horaObito: 94,
-    localObito: 92,
-    tipoLocal: 95,
-    municipioObito: 98,
-    ufObito: 99,
-    causaMortis: 91,
-    cid10: 93,
-    nomeMedico: 89,
-    crmMedico: 92,
-    ufCrm: 96,
-    sepultamentoCremacao: 90,
-    cemiterio: 88,
-    deixouBens: 85,
-    deixouTestamento: 85,
-    deixouFilhos: 88,
-    qtdFilhos: 85,
-    nomesFilhos: 80,
-    nomeDeclarante: 92,
-    qualificacaoDeclarante: 90
-  };
+  const confidenceMap: OCRConfidenceMap = createEmptyOCRConfidence();
+  for (const k of Object.keys(parsed) as (keyof DeathRecordData)[]) {
+    if (parsed[k] && String(parsed[k]).trim().length > 0) {
+      confidenceMap[k] = 92;
+    }
+  }
 
   const fieldExtractions: Partial<Record<keyof DeathRecordData, OCRFieldExtraction>> = {};
 
@@ -515,13 +487,22 @@ export function parseStructuredDeathRecord(
     { field: 'nomeMedico', label: 'Médico Atestante', fallbackBbox: { x: 3.75, y: 30.4, w: 50.0, h: 2.3 } },
     { field: 'crmMedico', label: 'CRM Médico', fallbackBbox: { x: 54.5, y: 30.4, w: 20.8, h: 2.3 } },
     { field: 'cemiterio', label: 'Cemitério / Sepultamento', fallbackBbox: { x: 3.75, y: 35.5, w: 45.8, h: 2.3 } },
+    { field: 'naturalidadeMunicipio', label: 'Naturalidade (Município/UF)', fallbackBbox: { x: 67.9, y: 8.5, w: 28.3, h: 2.2 } },
+    { field: 'escolaridade', label: 'Escolaridade', fallbackBbox: { x: 3.75, y: 19.0, w: 30.0, h: 2.2 } },
+    { field: 'ocupacao', label: 'Ocupação Habitual', fallbackBbox: { x: 45.0, y: 19.0, w: 40.0, h: 2.2 } },
+    { field: 'enderecoResidencia', label: 'Endereço de Residência', fallbackBbox: { x: 3.75, y: 24.0, w: 60.0, h: 2.2 } },
+    { field: 'bairroResidencia', label: 'Bairro de Residência', fallbackBbox: { x: 3.75, y: 26.5, w: 25.0, h: 2.2 } },
+    { field: 'municipioResidencia', label: 'Município de Residência', fallbackBbox: { x: 35.0, y: 26.5, w: 35.0, h: 2.2 } },
+    { field: 'estabelecimentoObito', label: 'Estabelecimento de Ocorrência', fallbackBbox: { x: 35.4, y: 31.0, w: 40.0, h: 2.2 } },
+    { field: 'cartorioNome', label: 'Cartório do Registro', fallbackBbox: { x: 3.75, y: 82.0, w: 50.0, h: 2.2 } },
+    { field: 'registroTermo', label: 'Termo de Registro', fallbackBbox: { x: 60.0, y: 82.0, w: 25.0, h: 2.2 } },
     { field: 'nomeDeclarante', label: 'Declarante do Óbito', fallbackBbox: { x: 50.4, y: 35.5, w: 45.8, h: 2.3 } }
   ];
 
   for (const item of fieldList) {
     const val = String(parsed[item.field] || '');
     const bbox = facsimileBBoxes[item.field] || item.fallbackBbox;
-    const conf = confidenceMap[item.field] || 90;
+    const conf = val ? (confidenceMap[item.field] || 90) : 0;
 
     fieldExtractions[item.field] = {
       field: item.field,
@@ -548,7 +529,7 @@ export async function processUploadedOCRFile(
   file: File,
   currentRecord: DeathRecordData,
   onProgress?: (step: string, percent: number) => void,
-  engineMode: OCREngineMode = 'LOCAL_FAST'
+  engineMode: OCREngineMode = 'HYBRID_VISION'
 ): Promise<{
   state: OCRDocumentState;
   parsedRecord: DeathRecordData;
@@ -594,14 +575,14 @@ export async function processUploadedOCRFile(
 
     const finalRecord: DeathRecordData = {
       numeroDO: extractedRecord.numeroDO || (classification.type === 'DECLARACAO_OBITO' ? 'NÃO DETECTADO' : 'NÃO CONSTA (INCOMPATÍVEL)'),
-      nomeFalecido: extractedRecord.nomeFalecido || 'NÃO LOCALIZADO NO DOCUMENTO',
+      nomeFalecido: extractedRecord.nomeFalecido || '',
       cpf: extractedRecord.cpf || '',
       rg: extractedRecord.rg || '',
       rgOrgaoEmissor: extractedRecord.rgOrgaoEmissor || '',
       dataNascimento: extractedRecord.dataNascimento || '',
-      sexo: (extractedRecord.sexo || currentRecord?.sexo || 'I') as 'M' | 'F' | 'I',
-      corRaca: (extractedRecord.corRaca || currentRecord?.corRaca || 'PARDA') as 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA',
-      estadoCivil: (extractedRecord.estadoCivil || currentRecord?.estadoCivil || 'SOLTEIRO') as 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE',
+      sexo: (extractedRecord.sexo || '') as any,
+      corRaca: (extractedRecord.corRaca || '') as any,
+      estadoCivil: (extractedRecord.estadoCivil || '') as any,
       dataCasamento: extractedRecord.dataCasamento || '',
       nomeConjuge: extractedRecord.nomeConjuge || '',
       nomeMae: extractedRecord.nomeMae || '',
@@ -609,7 +590,7 @@ export async function processUploadedOCRFile(
       dataObito: extractedRecord.dataObito || '',
       horaObito: extractedRecord.horaObito || '',
       localObito: extractedRecord.localObito || '',
-      tipoLocal: (extractedRecord.tipoLocal || currentRecord?.tipoLocal || 'HOSPITAL') as 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS',
+      tipoLocal: (extractedRecord.tipoLocal || '') as any,
       municipioObito: extractedRecord.municipioObito || '',
       ufObito: extractedRecord.ufObito || '',
       causaMortis: extractedRecord.causaMortis || '',
@@ -619,13 +600,26 @@ export async function processUploadedOCRFile(
       ufCrm: extractedRecord.ufCrm || '',
       sepultamentoCremacao: extractedRecord.sepultamentoCremacao || '',
       cemiterio: extractedRecord.cemiterio || '',
-      deixouBens: (extractedRecord.deixouBens || currentRecord?.deixouBens || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-      deixouTestamento: (extractedRecord.deixouTestamento || currentRecord?.deixouTestamento || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-      deixouFilhos: (extractedRecord.deixouFilhos || currentRecord?.deixouFilhos || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+      deixouBens: (extractedRecord.deixouBens || '') as any,
+      deixouTestamento: (extractedRecord.deixouTestamento || '') as any,
+      deixouFilhos: (extractedRecord.deixouFilhos || '') as any,
       qtdFilhos: extractedRecord.qtdFilhos || 0,
       nomesFilhos: extractedRecord.nomesFilhos || '',
       nomeDeclarante: extractedRecord.nomeDeclarante || '',
-      qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || ''
+      qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || '',
+      naturalidadeMunicipio: extractedRecord.naturalidadeMunicipio || '',
+      naturalidadeUf: extractedRecord.naturalidadeUf || '',
+      ocupacao: extractedRecord.ocupacao || '',
+      escolaridade: extractedRecord.escolaridade || '',
+      enderecoResidencia: extractedRecord.enderecoResidencia || '',
+      bairroResidencia: extractedRecord.bairroResidencia || '',
+      municipioResidencia: extractedRecord.municipioResidencia || '',
+      ufResidencia: extractedRecord.ufResidencia || '',
+      cepResidencia: extractedRecord.cepResidencia || '',
+      estabelecimentoObito: extractedRecord.estabelecimentoObito || '',
+      dataAtestadoMedico: extractedRecord.dataAtestadoMedico || '',
+      cartorioNome: extractedRecord.cartorioNome || '',
+      registroTermo: extractedRecord.registroTermo || ''
     };
 
     const documentState: OCRDocumentState = {
@@ -651,18 +645,23 @@ export async function processUploadedOCRFile(
     };
   }
 
-  // 3. Processamento Híbrido Opcional com Vision LLM (com fallback automático se indisponível)
-  onProgress?.('Consultando serviço de visão computacional multimodal...', 30);
+  // 3. Processamento Híbrido com Google Gemini Vision API (com fallback automático se offline)
+  onProgress?.('Consultando Google Gemini Vision API (Multimodal)...', 30);
   let visionSuccess = false;
   let visionData: any = null;
+  let visionEngineName = 'Google Gemini Vision AI';
 
   try {
+    // Extrai o MIME type real dos dados convertidos (canvas ou arquivo de imagem)
+    const mimeMatch = imageUrl.match(/^data:([^;]+);base64,/i);
+    const effectiveMime = mimeMatch ? mimeMatch[1] : (isPdf ? 'image/jpeg' : file.type || 'image/jpeg');
+
     const res = await fetch('/api/vision-ocr', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         imageBase64: imageUrl,
-        mimeType: file.type || (isPdf ? 'application/pdf' : 'image/jpeg'),
+        mimeType: effectiveMime,
         fileName: file.name
       })
     });
@@ -672,52 +671,19 @@ export async function processUploadedOCRFile(
       if (json.success && json.data && json.data.fields && json.data.fields.length > 0) {
         visionSuccess = true;
         visionData = json.data;
-        onProgress?.('Vision LLM mapeou campos e Bounding Boxes com sucesso...', 80);
+        visionEngineName = json.source || 'Google Gemini Vision AI';
+        onProgress?.(`Google Vision AI mapeou ${json.data.fields.length} campos e Bounding Boxes com sucesso...`, 80);
       }
     }
   } catch (visionErr) {
-    console.warn('Vision LLM indisponível ou offline. Alternando para OCR Local:', visionErr);
+    console.warn('Google Vision API indisponível ou offline. Alternando para OCR Local:', visionErr);
   }
 
-  // 3. FLUXO A: VISION LLM MULTIMODAL PROCESSOU O ARQUIVO
+  // 3. FLUXO A: GOOGLE GEMINI VISION API PROCESSOU O ARQUIVO
   if (visionSuccess && visionData) {
     onProgress?.('Calculando projeções espaciais e Bounding Boxes da imagem...', 90);
     const fieldExtractions: Partial<Record<keyof DeathRecordData, OCRFieldExtraction>> = {};
-    const confidenceMap: OCRConfidenceMap = {
-      numeroDO: 95,
-      nomeFalecido: 94,
-      cpf: 96,
-      rg: 90,
-      rgOrgaoEmissor: 88,
-      dataNascimento: 92,
-      sexo: 99,
-      corRaca: 91,
-      estadoCivil: 89,
-      dataCasamento: 85,
-      nomeConjuge: 87,
-      nomeMae: 93,
-      nomePai: 90,
-      dataObito: 97,
-      horaObito: 94,
-      localObito: 92,
-      tipoLocal: 95,
-      municipioObito: 98,
-      ufObito: 99,
-      causaMortis: 91,
-      cid10: 93,
-      nomeMedico: 89,
-      crmMedico: 92,
-      ufCrm: 95,
-      sepultamentoCremacao: 90,
-      cemiterio: 88,
-      deixouBens: 85,
-      deixouTestamento: 85,
-      deixouFilhos: 90,
-      qtdFilhos: 85,
-      nomesFilhos: 80,
-      nomeDeclarante: 90,
-      qualificacaoDeclarante: 85
-    };
+    const confidenceMap: OCRConfidenceMap = createEmptyOCRConfidence();
     const extractedRecord: Partial<DeathRecordData> = {};
 
     for (const item of visionData.fields) {
@@ -778,14 +744,14 @@ export async function processUploadedOCRFile(
 
     const finalRecord: DeathRecordData = {
       numeroDO: extractedRecord.numeroDO || (isDO ? 'NÃO DETECTADO' : 'NÃO CONSTA (INCOMPATÍVEL)'),
-      nomeFalecido: extractedRecord.nomeFalecido || 'NÃO LOCALIZADO NO DOCUMENTO',
+      nomeFalecido: extractedRecord.nomeFalecido || '',
       cpf: extractedRecord.cpf || '',
       rg: extractedRecord.rg || '',
       rgOrgaoEmissor: extractedRecord.rgOrgaoEmissor || '',
       dataNascimento: extractedRecord.dataNascimento || '',
-      sexo: (extractedRecord.sexo || currentRecord?.sexo || 'I') as 'M' | 'F' | 'I',
-      corRaca: (extractedRecord.corRaca || currentRecord?.corRaca || 'PARDA') as 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA',
-      estadoCivil: (extractedRecord.estadoCivil || currentRecord?.estadoCivil || 'SOLTEIRO') as 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE',
+      sexo: (extractedRecord.sexo || '') as any,
+      corRaca: (extractedRecord.corRaca || '') as any,
+      estadoCivil: (extractedRecord.estadoCivil || '') as any,
       dataCasamento: extractedRecord.dataCasamento || '',
       nomeConjuge: extractedRecord.nomeConjuge || '',
       nomeMae: extractedRecord.nomeMae || '',
@@ -793,7 +759,7 @@ export async function processUploadedOCRFile(
       dataObito: extractedRecord.dataObito || '',
       horaObito: extractedRecord.horaObito || '',
       localObito: extractedRecord.localObito || '',
-      tipoLocal: (extractedRecord.tipoLocal || currentRecord?.tipoLocal || 'HOSPITAL') as 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS',
+      tipoLocal: (extractedRecord.tipoLocal || '') as any,
       municipioObito: extractedRecord.municipioObito || '',
       ufObito: extractedRecord.ufObito || '',
       causaMortis: extractedRecord.causaMortis || '',
@@ -803,13 +769,26 @@ export async function processUploadedOCRFile(
       ufCrm: extractedRecord.ufCrm || '',
       sepultamentoCremacao: extractedRecord.sepultamentoCremacao || '',
       cemiterio: extractedRecord.cemiterio || '',
-      deixouBens: (extractedRecord.deixouBens || currentRecord?.deixouBens || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-      deixouTestamento: (extractedRecord.deixouTestamento || currentRecord?.deixouTestamento || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-      deixouFilhos: (extractedRecord.deixouFilhos || currentRecord?.deixouFilhos || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+      deixouBens: (extractedRecord.deixouBens || '') as any,
+      deixouTestamento: (extractedRecord.deixouTestamento || '') as any,
+      deixouFilhos: (extractedRecord.deixouFilhos || '') as any,
       qtdFilhos: extractedRecord.qtdFilhos || 0,
       nomesFilhos: extractedRecord.nomesFilhos || '',
       nomeDeclarante: extractedRecord.nomeDeclarante || '',
-      qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || ''
+      qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || '',
+      naturalidadeMunicipio: extractedRecord.naturalidadeMunicipio || '',
+      naturalidadeUf: extractedRecord.naturalidadeUf || '',
+      ocupacao: extractedRecord.ocupacao || '',
+      escolaridade: extractedRecord.escolaridade || '',
+      enderecoResidencia: extractedRecord.enderecoResidencia || '',
+      bairroResidencia: extractedRecord.bairroResidencia || '',
+      municipioResidencia: extractedRecord.municipioResidencia || '',
+      ufResidencia: extractedRecord.ufResidencia || '',
+      cepResidencia: extractedRecord.cepResidencia || '',
+      estabelecimentoObito: extractedRecord.estabelecimentoObito || '',
+      dataAtestadoMedico: extractedRecord.dataAtestadoMedico || '',
+      cartorioNome: extractedRecord.cartorioNome || '',
+      registroTermo: extractedRecord.registroTermo || ''
     };
 
     onProgress?.('Concluído via Vision LLM Multimodal.', 100);
@@ -827,7 +806,7 @@ export async function processUploadedOCRFile(
       timestamp: new Date().toLocaleTimeString('pt-BR'),
       imageDimensions: dimensions,
       classification,
-      engine: 'Vision LLM (Multimodal)'
+      engine: visionEngineName
     };
 
     return {
@@ -856,14 +835,14 @@ export async function processUploadedOCRFile(
 
   const finalRecord: DeathRecordData = {
     numeroDO: extractedRecord.numeroDO || (classification.type === 'DECLARACAO_OBITO' ? 'NÃO DETECTADO' : 'NÃO CONSTA (INCOMPATÍVEL)'),
-    nomeFalecido: extractedRecord.nomeFalecido || 'NÃO LOCALIZADO NO DOCUMENTO',
+    nomeFalecido: extractedRecord.nomeFalecido || '',
     cpf: extractedRecord.cpf || '',
     rg: extractedRecord.rg || '',
     rgOrgaoEmissor: extractedRecord.rgOrgaoEmissor || '',
     dataNascimento: extractedRecord.dataNascimento || '',
-    sexo: (extractedRecord.sexo || currentRecord?.sexo || 'I') as 'M' | 'F' | 'I',
-    corRaca: (extractedRecord.corRaca || currentRecord?.corRaca || 'PARDA') as 'BRANCA' | 'PRETA' | 'PARDA' | 'AMARELA' | 'INDIGENA',
-    estadoCivil: (extractedRecord.estadoCivil || currentRecord?.estadoCivil || 'SOLTEIRO') as 'SOLTEIRO' | 'CASADO' | 'VIUVO' | 'VIUVA' | 'DIVORCIADO' | 'SEPARADO_JUDICIALMENTE',
+    sexo: (extractedRecord.sexo || '') as any,
+    corRaca: (extractedRecord.corRaca || '') as any,
+    estadoCivil: (extractedRecord.estadoCivil || '') as any,
     dataCasamento: extractedRecord.dataCasamento || '',
     nomeConjuge: extractedRecord.nomeConjuge || '',
     nomeMae: extractedRecord.nomeMae || '',
@@ -871,7 +850,7 @@ export async function processUploadedOCRFile(
     dataObito: extractedRecord.dataObito || '',
     horaObito: extractedRecord.horaObito || '',
     localObito: extractedRecord.localObito || '',
-    tipoLocal: (extractedRecord.tipoLocal || currentRecord?.tipoLocal || 'HOSPITAL') as 'HOSPITAL' | 'DOMICILIO' | 'VIA_PUBLICA' | 'OUTROS',
+    tipoLocal: (extractedRecord.tipoLocal || '') as any,
     municipioObito: extractedRecord.municipioObito || '',
     ufObito: extractedRecord.ufObito || '',
     causaMortis: extractedRecord.causaMortis || '',
@@ -881,13 +860,26 @@ export async function processUploadedOCRFile(
     ufCrm: extractedRecord.ufCrm || '',
     sepultamentoCremacao: extractedRecord.sepultamentoCremacao || '',
     cemiterio: extractedRecord.cemiterio || '',
-    deixouBens: (extractedRecord.deixouBens || currentRecord?.deixouBens || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-    deixouTestamento: (extractedRecord.deixouTestamento || currentRecord?.deixouTestamento || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
-    deixouFilhos: (extractedRecord.deixouFilhos || currentRecord?.deixouFilhos || 'IGNORADO') as 'SIM' | 'NAO' | 'IGNORADO',
+    deixouBens: (extractedRecord.deixouBens || '') as any,
+    deixouTestamento: (extractedRecord.deixouTestamento || '') as any,
+    deixouFilhos: (extractedRecord.deixouFilhos || '') as any,
     qtdFilhos: extractedRecord.qtdFilhos || 0,
     nomesFilhos: extractedRecord.nomesFilhos || '',
     nomeDeclarante: extractedRecord.nomeDeclarante || '',
-    qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || ''
+    qualificacaoDeclarante: extractedRecord.qualificacaoDeclarante || '',
+    naturalidadeMunicipio: extractedRecord.naturalidadeMunicipio || '',
+    naturalidadeUf: extractedRecord.naturalidadeUf || '',
+    ocupacao: extractedRecord.ocupacao || '',
+    escolaridade: extractedRecord.escolaridade || '',
+    enderecoResidencia: extractedRecord.enderecoResidencia || '',
+    bairroResidencia: extractedRecord.bairroResidencia || '',
+    municipioResidencia: extractedRecord.municipioResidencia || '',
+    ufResidencia: extractedRecord.ufResidencia || '',
+    cepResidencia: extractedRecord.cepResidencia || '',
+    estabelecimentoObito: extractedRecord.estabelecimentoObito || '',
+    dataAtestadoMedico: extractedRecord.dataAtestadoMedico || '',
+    cartorioNome: extractedRecord.cartorioNome || '',
+    registroTermo: extractedRecord.registroTermo || ''
   };
 
   const documentState: OCRDocumentState = {
